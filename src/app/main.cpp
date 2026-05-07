@@ -26,6 +26,11 @@ int main(int argc, char** argv)
 
         std::cout << "video_sentinel started\n";
         std::cout << "config_dir: " << config_dir << '\n';
+#if defined(SENTINEL_ENABLE_DEV_LOGGING) && SENTINEL_ENABLE_DEV_LOGGING
+        std::cout << "build_profile: development\n";
+#else
+        std::cout << "build_profile: production\n";
+#endif
         std::cout << "service: " << config.service.host << ':' << config.service.port << '\n';
         std::cout << "camera: " << config.cameras.front().id << " (" << config.cameras.front().type
                       << ")\n";

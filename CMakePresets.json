@@ -1,0 +1,86 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": "base",
+      "displayName": "Development",
+      "description": "Debug build with tests, mock sources, and development logging enabled.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_TESTS": "ON",
+        "ENABLE_MOCK_SOURCES": "ON",
+        "ENABLE_DEV_WARNINGS": "ON",
+        "ENABLE_DEV_LOGGING": "ON",
+        "ENABLE_SANITIZERS": "OFF"
+      }
+    },
+    {
+      "name": "asan",
+      "inherits": "dev",
+      "displayName": "Development (ASan/UBSan)",
+      "description": "Debug build with sanitizers enabled for memory and UB checks.",
+      "cacheVariables": {
+        "ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "prod",
+      "inherits": "base",
+      "displayName": "Production",
+      "description": "Release build without tests, mock sources, or development logging.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ENABLE_TESTS": "OFF",
+        "ENABLE_MOCK_SOURCES": "OFF",
+        "ENABLE_DEV_WARNINGS": "ON",
+        "ENABLE_DEV_LOGGING": "OFF",
+        "ENABLE_SANITIZERS": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "prod",
+      "configurePreset": "prod"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

@@ -1,7 +1,9 @@
 #include "sentinel/video/video_source_factory.hpp"
 
 #include "sentinel/video/camera_video_source.hpp"
+#if defined(SENTINEL_ENABLE_MOCK_SOURCES) && SENTINEL_ENABLE_MOCK_SOURCES
 #include "sentinel/video/mock_video_source.hpp"
+#endif
 #include "sentinel/video/rtsp_video_source.hpp"
 
 #include <memory>
@@ -16,9 +18,11 @@ namespace sentinel {
  */
 std::unique_ptr<VideoSource> create_video_source(const CameraConfig& camera)
 {
+#if defined(SENTINEL_ENABLE_MOCK_SOURCES) && SENTINEL_ENABLE_MOCK_SOURCES
     if (camera.type == "mock") {
         return std::make_unique<MockVideoSource>(camera);
     }
+#endif
     if (camera.type == "v4l2") {
         return std::make_unique<CameraVideoSource>(camera);
     }

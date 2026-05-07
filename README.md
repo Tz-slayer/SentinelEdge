@@ -26,6 +26,7 @@
 ## 构建要求
 
 - CMake 3.16+
+- 若使用 `CMakePresets.json`，建议 CMake 3.21+
 - 支持 C++17 的编译器
 
 ## 构建与测试
@@ -35,6 +36,200 @@ cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+## 开发与生产构建
+
+本项目不维护两份 `CMakeLists.txt`。  
+开发阶段和生产阶段的区别通过 **一套工程定义 + 多组构建开关 + CMake Preset** 来管理。
+
+### 当前构建开关
+
+- `ENABLE_TESTS`
+  是否编译测试目标并启用 `ctest`
+- `ENABLE_MOCK_SOURCES`
+  是否编译 mock 视频源策略
+- `ENABLE_DEV_WARNINGS`
+  是否启用额外编译警告
+- `ENABLE_DEV_LOGGING`
+  是否启用开发阶段运行时标识输出
+- `ENABLE_SANITIZERS`
+  是否启用 AddressSanitizer 和 UndefinedBehaviorSanitizer
+
+### 推荐使用方式
+
+开发构建：
+
+```bash
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
+带 Sanitizer 的开发构建：
+
+```bash
+cmake --preset asan
+cmake --build --preset asan
+ctest --preset asan
+```
+
+生产构建：
+
+```bash
+cmake --preset prod
+cmake --build --preset prod
+```
+
+### 当前 preset 的行为差异
+
+- `dev`
+  `Debug` 构建，开启测试、mock 视频源、开发日志
+- `asan`
+  在 `dev` 基础上额外开启 sanitizers
+- `prod`
+  `Release` 构建，关闭测试、关闭 mock 视频源、关闭开发日志
+
+### 生产构建需要注意
+
+`prod` preset 默认关闭了 mock 视频源，因此：
+
+- 生产构建不会编译 `sentinel_tests`
+- 若运行时仍然使用 `type: "mock"` 的摄像头配置，工厂会拒绝创建该视频源
+
+这意味着开发样例配置主要服务于调试和测试，真正的生产运行应切换到 `v4l2` 或后续实现的 `rtsp` 配置。
+
+## CMake 构建产物说明
+
+第一次接触 CMake 时，最容易困惑的是：为什么执行一次构建命令，仓库里会突然多出一堆文件和目录。
+
+这里的关键点是：**CMake 会把“构建过程需要的中间文件”和“最终编译出来的产物”都放到构建目录里**。  
+本项目采用的是“out-of-source build”，也就是：
+
+- 源码仍然放在仓库根目录、`src/`、`include/`、`tests/` 等位置
+- 构建过程中生成的文件放在单独的目录里，例如 `build/` 或 `build-v4l2/`
+
+例如下面这条命令：
+
+```bash
+cmake -S . -B build-v4l2
+```
+
+含义是：
+
+- `-S .`：源码目录是当前项目根目录
+- `-B build-v4l2`：把所有构建相关文件输出到 `build-v4l2/`
+
+所以你看到的 `build-v4l2/` 不是源码目录，而是一个**构建工作目录**。
+
+### 常见构建产物
+
+在 `build/` 或 `build-v4l2/` 里，常见文件大致分成几类：
+
+1. CMake 自己的配置文件
+
+- `CMakeCache.txt`
+  保存本次配置结果，例如编译器路径、选项、缓存变量。
+- `CMakeFiles/`
+  保存 CMake 内部使用的大量中间文件，例如依赖关系、规则文件、配置日志。
+- `Makefile`
+  如果当前生成器是 Makefiles，这个文件就是后续 `cmake --build` 实际调用的构建入口。
+- `cmake_install.cmake`
+  安装阶段用到的脚本。
+
+这些文件的作用是让 CMake 记住“这次工程是怎么配置出来的”，下次增量构建时就不用从零开始分析。
+
+2. 测试描述文件
+
+- `CTestTestfile.cmake`
+  记录测试目标，供 `ctest` 使用。
+
+它的作用是告诉 `ctest`：
+
+- 有哪些测试
+- 每个测试运行哪个可执行文件
+- 测试参数是什么
+
+3. 编译产物
+
+- `libsentinel_core.a`
+  这是静态库，里面打包了当前项目的核心 C++ 代码。
+- `video_sentinel`
+  主程序可执行文件。
+- `sentinel_tests`
+  流水线冒烟测试程序，用来验证配置加载、默认视频源选择、策略注入和事件生成链路是否正常。
+- `sentinel_signal_tests`
+  信号处理测试程序，用来验证 `LinuxSignalFd` 是否能正确接收并消费 `SIGINT`。
+- `sentinel_camera_tests`
+  本地摄像头输入层测试程序，用来验证 `CameraVideoSource` 在设备不存在等失败路径下是否能稳定返回错误。
+
+其中：
+
+- `video_sentinel` 是真正运行的应用程序
+- 其余三个 `sentinel_*tests` 都是测试程序，不是给最终用户直接运行的主程序
+
+4. 依赖和日志类中间文件
+
+例如：
+
+- `CMakeConfigureLog.yaml`
+- `progress.marks`
+- 各种 `.cmake` 规则文件
+
+这类文件主要用于：
+
+- 记录配置过程
+- 描述编译依赖
+- 支持增量构建
+- 排查 CMake 配置问题
+
+### 为什么这些文件不提交到 Git
+
+这些文件都属于**构建产物**，不是项目源码的一部分。
+
+原因有几个：
+
+- 它们会随着编译器、系统环境、CMake 版本不同而变化
+- 其中很多文件是机器相关的，换一台电脑就不一定还能复用
+- 可执行文件和中间文件会让仓库变大、diff 变脏
+- 真正应该被版本控制的是源码、配置样例、文档和测试，而不是本地编译结果
+
+所以项目里的 `.gitignore` 已经忽略了：
+
+- `build/`
+- `build-*/`
+- `CMakeFiles/`
+- `CMakeCache.txt`
+- `Testing/`
+- 编译出来的 `.o`、`.a`、可执行文件等
+
+### 什么时候会看到不同的构建目录
+
+你可以为不同目的使用不同的构建目录，例如：
+
+- `build/`
+  默认本地开发构建目录
+- `build-v4l2/`
+  我在做 V4L2 相关重构和验证时单独使用的构建目录
+- `build-debug/`
+  以后如果你想专门做调试版构建，也可以这样命名
+
+这是一种很常见的做法，因为：
+
+- 不同目录可以保留不同配置结果
+- 避免互相污染缓存
+- 出现奇怪构建问题时，可以直接删除某个构建目录重新生成
+
+### 实践建议
+
+如果你怀疑某次 CMake 缓存脏了，最直接的做法通常不是手动删某几个文件，而是直接删整个构建目录再重新配置：
+
+```bash
+rm -rf build
+cmake -S . -B build
+cmake --build build
+```
+
+对这个项目来说，你可以把源码目录理解为“长期资产”，把 `build/`、`build-v4l2/` 这类目录理解为“随时可以删除并重新生成的工作目录”。
 
 ## 运行
 
