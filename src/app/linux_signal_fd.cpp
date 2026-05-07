@@ -8,6 +8,9 @@
 
 namespace sentinel {
 
+/**
+ * @brief 构造 `signalfd` 接收器并屏蔽停止信号。
+ */
 LinuxSignalFd::LinuxSignalFd()
 {
     if (::sigemptyset(&signal_mask_) == -1) {
@@ -31,6 +34,9 @@ LinuxSignalFd::LinuxSignalFd()
     }
 }
 
+/**
+ * @brief 析构时关闭 `signalfd` 并恢复旧信号掩码。
+ */
 LinuxSignalFd::~LinuxSignalFd()
 {
     if (fd_ != -1) {
@@ -39,11 +45,16 @@ LinuxSignalFd::~LinuxSignalFd()
     ::sigprocmask(SIG_SETMASK, &previous_mask_, nullptr);
 }
 
+/**
+ * @brief 消费一个停止信号。
+ * @return 若读取到了 `SIGINT` 或 `SIGTERM` 则返回 `true`。
+ */
 bool LinuxSignalFd::consume_stop_signal()
 {
     signalfd_siginfo signal_info {};
     const auto bytes_read = ::read(fd_, &signal_info, sizeof(signal_info));
 
+    // 非阻塞 signalfd 在没有信号时会返回 EAGAIN，此时不视为错误。
     if (bytes_read == -1) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return false;

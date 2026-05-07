@@ -5,15 +5,20 @@
 #include <exception>
 #include <iostream>
 
+/**
+ * @brief 程序主入口。
+ * @param argc 命令行参数数量。
+ * @param argv 命令行参数数组。
+ * @return 成功返回 `0`，失败返回非零值。
+ */
 int main(int argc, char** argv)
 {
-    // 如果用户传了命令行参数，使用传入路径作为配置目录，否则默认使用 config 目录
     const auto config_dir = argc > 1 ? argv[1] : "config";
 
     try {
         sentinel::LinuxSignalFd signal_fd;
 
-        // 载入配置
+        // 先加载配置，再把停止信号回调注入流水线，保证主循环可优雅退出。
         const auto config = sentinel::load_config(config_dir);
         const auto result = sentinel::run_demo_pipeline(config, [&signal_fd]() {
             return signal_fd.consume_stop_signal();

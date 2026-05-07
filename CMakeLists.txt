@@ -20,8 +20,10 @@ add_library(sentinel_core
     src/analytics/event_builder.cpp
     src/config/config_loader.cpp
     src/inference/mock_detector.cpp
+    src/video/camera_video_source.cpp
     src/video/mock_video_source.cpp
     src/video/rtsp_video_source.cpp
+    src/video/video_source_factory.cpp
 )
 
 target_include_directories(sentinel_core
@@ -70,4 +72,18 @@ target_link_libraries(sentinel_signal_tests
 add_test(
     NAME sentinel.signal_fd
     COMMAND sentinel_signal_tests
+)
+
+add_executable(sentinel_camera_tests
+    tests/unit/camera_video_source_test.cpp
+)
+
+target_link_libraries(sentinel_camera_tests
+    PRIVATE
+        sentinel_core
+)
+
+add_test(
+    NAME sentinel.camera_source
+    COMMAND sentinel_camera_tests
 )

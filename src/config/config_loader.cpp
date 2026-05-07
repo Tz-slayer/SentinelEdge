@@ -12,6 +12,11 @@
 namespace sentinel {
 namespace {
 
+/**
+ * @brief 去掉字符串首尾空白字符。
+ * @param value 原始字符串。
+ * @return 去掉首尾空白后的字符串。
+ */
 std::string trim(const std::string& value)
 {
     const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char ch) {
@@ -28,12 +33,22 @@ std::string trim(const std::string& value)
     return {first, last};
 }
 
+/**
+ * @brief 去掉一行配置中的注释部分。
+ * @param line 原始配置行。
+ * @return 去掉 `#` 之后内容的字符串。
+ */
 std::string strip_comment(const std::string& line)
 {
     const auto position = line.find('#');
     return position == std::string::npos ? line : line.substr(0, position);
 }
 
+/**
+ * @brief 去掉字符串两端成对的双引号。
+ * @param value 原始字符串。
+ * @return 去掉外层双引号后的字符串。
+ */
 std::string strip_quotes(const std::string& value)
 {
     const auto trimmed = trim(value);
@@ -43,6 +58,11 @@ std::string strip_quotes(const std::string& value)
     return trimmed;
 }
 
+/**
+ * @brief 将一行 `key: value` 配置拆分为键值对。
+ * @param line 待解析的配置行。
+ * @return 若存在键值分隔符则返回键值对，否则返回空。
+ */
 std::optional<std::pair<std::string, std::string>> split_key_value(const std::string& line)
 {
     const auto separator = line.find(':');
@@ -53,12 +73,22 @@ std::optional<std::pair<std::string, std::string>> split_key_value(const std::st
     return std::make_pair(trim(line.substr(0, separator)), strip_quotes(line.substr(separator + 1)));
 }
 
+/**
+ * @brief 将文本值解析为布尔值。
+ * @param value 原始配置字符串。
+ * @return 支持 `true`、`1`、`yes`，其余情况返回 `false`。
+ */
 bool parse_bool(const std::string& value)
 {
     const auto normalized = strip_quotes(value);
     return normalized == "true" || normalized == "1" || normalized == "yes";
 }
 
+/**
+ * @brief 解析形如 `[a, b, c]` 的内联列表。
+ * @param value 原始配置字符串。
+ * @return 解析出的字符串列表；若格式不合法则返回空列表。
+ */
 std::vector<std::string> parse_inline_list(const std::string& value)
 {
     const auto trimmed = trim(value);
@@ -78,6 +108,12 @@ std::vector<std::string> parse_inline_list(const std::string& value)
     return items;
 }
 
+/**
+ * @brief 在配置目录中解析某一类配置文件路径。
+ * @param config_dir 配置目录。
+ * @param name 配置文件基础名，例如 `sentinel`。
+ * @return 实际存在的配置文件路径。
+ */
 std::filesystem::path resolve_config_file(const std::filesystem::path& config_dir,
                                           const std::string& name)
 {
@@ -94,6 +130,11 @@ std::filesystem::path resolve_config_file(const std::filesystem::path& config_di
     throw std::runtime_error("missing config file: " + real_file.string());
 }
 
+/**
+ * @brief 读取配置文件并过滤空行与注释。
+ * @param path 配置文件路径。
+ * @return 清洗后的配置行列表。
+ */
 std::vector<std::string> read_config_lines(const std::filesystem::path& path)
 {
     std::ifstream file(path);
@@ -112,12 +153,18 @@ std::vector<std::string> read_config_lines(const std::filesystem::path& path)
     return lines;
 }
 
+/**
+ * @brief 载入服务级配置。
+ * @param config_dir 配置目录。
+ * @param config 待写入的聚合配置对象。
+ */
 void load_service_config(const std::filesystem::path& config_dir, SentinelConfig& config)
 {
     const auto lines = read_config_lines(resolve_config_file(config_dir, "sentinel"));
     std::string section;
 
     for (const auto& line : lines) {
+        // 先识别当前所在的小节，后续键值会按小节归类写入。
         if (line.back() == ':' && line.find(':') == line.size() - 1) {
             section = trim(line.substr(0, line.size() - 1));
             continue;
@@ -141,6 +188,12 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
     }
 }
 
+/**
+ * @brief 将一条摄像头键值写入摄像头配置对象。
+ * @param camera 待更新的摄像头配置。
+ * @param key 配置键。
+ * @param value 配置值。
+ */
 void apply_camera_value(CameraConfig& camera, const std::string& key, const std::string& value)
 {
     if (key == "id") {
@@ -162,6 +215,11 @@ void apply_camera_value(CameraConfig& camera, const std::string& key, const std:
     }
 }
 
+/**
+ * @brief 载入摄像头列表配置。
+ * @param config_dir 配置目录。
+ * @param config 待写入的聚合配置对象。
+ */
 void load_camera_config(const std::filesystem::path& config_dir, SentinelConfig& config)
 {
     const auto lines = read_config_lines(resolve_config_file(config_dir, "cameras"));
@@ -169,6 +227,7 @@ void load_camera_config(const std::filesystem::path& config_dir, SentinelConfig&
     CameraConfig current;
     bool has_current = false;
 
+    // 只有在已经开始构造一个摄像头条目后，才允许真正提交到列表。
     const auto commit_current = [&]() {
         if (has_current) {
             cameras.push_back(current);
@@ -181,6 +240,7 @@ void load_camera_config(const std::filesystem::path& config_dir, SentinelConfig&
         }
 
         auto line = raw_line;
+        // 以 "- " 开头表示进入一个新的摄像头条目，需要先提交上一个对象。
         if (line.rfind("- ", 0) == 0) {
             commit_current();
             current = CameraConfig{};
@@ -201,6 +261,11 @@ void load_camera_config(const std::filesystem::path& config_dir, SentinelConfig&
     config.cameras = cameras;
 }
 
+/**
+ * @brief 载入事件规则配置。
+ * @param config_dir 配置目录。
+ * @param config 待写入的聚合配置对象。
+ */
 void load_rule_config(const std::filesystem::path& config_dir, SentinelConfig& config)
 {
     const auto lines = read_config_lines(resolve_config_file(config_dir, "rules"));
@@ -235,6 +300,11 @@ void load_rule_config(const std::filesystem::path& config_dir, SentinelConfig& c
 
 } // namespace
 
+/**
+ * @brief 载入并校验应用配置。
+ * @param config_dir 配置目录。
+ * @return 已完成基础校验的聚合配置对象。
+ */
 SentinelConfig load_config(const std::filesystem::path& config_dir)
 {
     SentinelConfig config;
@@ -242,6 +312,7 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     load_camera_config(config_dir, config);
     load_rule_config(config_dir, config);
 
+    // 先做最基本的运行前校验，避免后续流水线在空配置上继续运行。
     if (config.cameras.empty()) {
         throw std::runtime_error("at least one camera must be configured");
     }

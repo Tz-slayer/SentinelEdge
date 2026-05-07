@@ -8,6 +8,11 @@
 
 namespace {
 
+/**
+ * @brief 断言条件成立，否则输出错误并退出。
+ * @param condition 待检查条件。
+ * @param message 失败时输出的错误消息。
+ */
 void expect(bool condition, std::string_view message)
 {
     if (!condition) {
@@ -18,6 +23,10 @@ void expect(bool condition, std::string_view message)
 
 } // namespace
 
+/**
+ * @brief 验证 `signalfd` 能正确消费本进程发送的 `SIGINT`。
+ * @return 成功返回 `0`，失败返回非零值。
+ */
 int main()
 {
     sentinel::LinuxSignalFd signal_fd;
