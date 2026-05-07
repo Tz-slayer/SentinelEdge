@@ -18,6 +18,15 @@ struct ServiceConfig {
 };
 
 /**
+ * @brief 日志系统运行配置。
+ */
+struct LoggingConfig {
+    std::string backend{"stderr"};
+    std::string level{"info"};
+    std::string ident{"video_sentinel"};
+};
+
+/**
  * @brief 单路摄像头或视频流输入配置。
  */
 struct CameraConfig {
@@ -46,6 +55,7 @@ struct RuleConfig {
  */
 struct SentinelConfig {
     ServiceConfig service;
+    LoggingConfig logging;
     std::vector<CameraConfig> cameras;
     RuleConfig rules;
 };

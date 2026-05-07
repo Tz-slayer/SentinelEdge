@@ -26,7 +26,8 @@
         "ENABLE_MOCK_SOURCES": "ON",
         "ENABLE_DEV_WARNINGS": "ON",
         "ENABLE_DEV_LOGGING": "ON",
-        "ENABLE_SANITIZERS": "OFF"
+        "ENABLE_SANITIZERS": "OFF",
+        "SENTINEL_DEFAULT_CONFIG_DIR": "config/dev"
       }
     },
     {
@@ -49,7 +50,8 @@
         "ENABLE_MOCK_SOURCES": "OFF",
         "ENABLE_DEV_WARNINGS": "ON",
         "ENABLE_DEV_LOGGING": "OFF",
-        "ENABLE_SANITIZERS": "OFF"
+        "ENABLE_SANITIZERS": "OFF",
+        "SENTINEL_DEFAULT_CONFIG_DIR": "config/prod"
       }
     }
   ],

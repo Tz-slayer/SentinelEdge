@@ -24,6 +24,16 @@ option(ENABLE_DEV_WARNINGS "Enable extra compiler warnings" ON)
 option(ENABLE_DEV_LOGGING "Enable development-oriented runtime logging" ON)
 option(ENABLE_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
 
+set(SENTINEL_DEFAULT_CONFIG_DIR "config/prod" CACHE STRING "Default runtime config directory")
+
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated/include/sentinel/build)
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/sentinel/build/build_config.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/include/sentinel/build/build_config.hpp
+    @ONLY
+)
+
 add_library(sentinel_project_options INTERFACE)
 
 target_compile_features(sentinel_project_options INTERFACE cxx_std_17)
@@ -64,6 +74,10 @@ set(SENTINEL_CORE_SOURCES
     src/analytics/event_builder.cpp
     src/config/config_loader.cpp
     src/inference/mock_detector.cpp
+    src/logging/logger.cpp
+    src/logging/logger_factory.cpp
+    src/logging/stderr_logger.cpp
+    src/logging/syslog_logger.cpp
     src/video/camera_video_source.cpp
     src/video/rtsp_video_source.cpp
     src/video/video_source_factory.cpp
@@ -82,6 +96,7 @@ add_library(sentinel_core
 target_include_directories(sentinel_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_BINARY_DIR}/generated/include
 )
 
 target_link_libraries(sentinel_core
@@ -94,6 +109,15 @@ add_executable(video_sentinel
 )
 
 target_link_libraries(video_sentinel
+    PRIVATE
+        sentinel_core
+)
+
+add_executable(sentinel_camera_probe
+    tools/camera_probe.cpp
+)
+
+target_link_libraries(sentinel_camera_probe
     PRIVATE
         sentinel_core
 )
@@ -113,7 +137,7 @@ if(ENABLE_TESTS)
 
         add_test(
             NAME sentinel.pipeline_smoke
-            COMMAND sentinel_tests ${CMAKE_CURRENT_SOURCE_DIR}/config
+            COMMAND sentinel_tests ${CMAKE_CURRENT_SOURCE_DIR}/config/dev
         )
     endif()
 
@@ -144,6 +168,20 @@ if(ENABLE_TESTS)
         NAME sentinel.camera_source
         COMMAND sentinel_camera_tests
     )
+
+    add_executable(sentinel_logging_tests
+        tests/unit/logger_factory_test.cpp
+    )
+
+    target_link_libraries(sentinel_logging_tests
+        PRIVATE
+            sentinel_core
+    )
+
+    add_test(
+        NAME sentinel.logging
+        COMMAND sentinel_logging_tests
+    )
 endif()
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
@@ -152,3 +190,4 @@ message(STATUS "ENABLE_MOCK_SOURCES=${ENABLE_MOCK_SOURCES}")
 message(STATUS "ENABLE_DEV_WARNINGS=${ENABLE_DEV_WARNINGS}")
 message(STATUS "ENABLE_DEV_LOGGING=${ENABLE_DEV_LOGGING}")
 message(STATUS "ENABLE_SANITIZERS=${ENABLE_SANITIZERS}")
+message(STATUS "SENTINEL_DEFAULT_CONFIG_DIR=${SENTINEL_DEFAULT_CONFIG_DIR}")

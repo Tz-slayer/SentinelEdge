@@ -180,6 +180,12 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             config.service.host = value;
         } else if (section == "service" && key == "port") {
             config.service.port = std::stoi(value);
+        } else if (section == "logging" && key == "backend") {
+            config.logging.backend = value;
+        } else if (section == "logging" && key == "level") {
+            config.logging.level = value;
+        } else if (section == "logging" && key == "ident") {
+            config.logging.ident = value;
         } else if (section == "runtime" && key == "data_dir") {
             config.service.data_dir = value;
         } else if (section == "pipeline" && key == "max_frames") {
@@ -318,6 +324,12 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     }
     if (config.service.max_frames <= 0) {
         throw std::runtime_error("pipeline.max_frames must be greater than zero");
+    }
+    if (config.logging.backend.empty()) {
+        throw std::runtime_error("logging.backend must not be empty");
+    }
+    if (config.logging.level.empty()) {
+        throw std::runtime_error("logging.level must not be empty");
     }
     if (config.rules.hold_frames <= 0) {
         throw std::runtime_error("events.hold_frames must be greater than zero");

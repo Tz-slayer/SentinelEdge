@@ -1,0 +1,7 @@
+detection:
+  target_classes: ["person", "vehicle"]
+  min_confidence: 0.60
+
+events:
+  hold_frames: 3
+  cooldown_frames: 15

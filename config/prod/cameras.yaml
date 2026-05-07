@@ -1,0 +1,9 @@
+cameras:
+  - id: "usb-camera-0"
+    name: "USB Camera"
+    type: "v4l2"
+    uri: "/dev/video0"
+    enabled: true
+    width: 640
+    height: 480
+    fps: 30

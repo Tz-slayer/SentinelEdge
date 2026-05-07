@@ -96,7 +96,7 @@ cmake --build --preset prod
 - 生产构建不会编译 `sentinel_tests`
 - 若运行时仍然使用 `type: "mock"` 的摄像头配置，工厂会拒绝创建该视频源
 
-这意味着开发样例配置主要服务于调试和测试，真正的生产运行应切换到 `v4l2` 或后续实现的 `rtsp` 配置。
+这意味着开发配置和生产配置必须分开管理。
 
 ## CMake 构建产物说明
 
@@ -239,13 +239,61 @@ cmake --build build
 
 预期输出会显示已加载的摄像头、处理帧数、检测数量和生成的事件。
 
+### 本地摄像头真机探针
+
+如果你要在嵌入式设备上先验证本地摄像头采集链路，而不是直接跑完整 pipeline，可以使用：
+
+```bash
+./build/dev/sentinel_camera_probe --device /dev/video0 --width 1280 --height 720 --fps 30 --frames 5
+```
+
+这个工具会：
+
+- 打开指定的 V4L2 设备
+- 连续抓取若干帧
+- 打印每一帧的分辨率、像素格式、字节数、时间戳
+- 把首帧保存到 `./data/captures/`
+
+当前 `CameraVideoSource` 优先请求 `MJPEG`。因此如果驱动最终返回的是 `MJPEG/JPEG`，首帧会直接保存为 `.jpg`，你可以在设备上把文件拷出来查看；如果驱动协商成其他格式，则会保存为 `.raw`，用于后续格式分析。
+
 ## 配置
 
-仓库只提交示例配置：
+当前仓库提供两套实际配置目录：
+
+- `config/dev/`
+  面向开发和测试，默认启用 `mock` 摄像头，便于在没有真实设备时跑通流程
+- `config/prod/`
+  面向生产构建，默认启用 `v4l2` 摄像头，禁用 mock 输入
+
+默认加载规则：
+
+- `dev` / `asan` preset 构建出的程序默认读取 `config/dev`
+- `prod` preset 构建出的程序默认读取 `config/prod`
+- 你仍然可以通过命令行参数显式指定配置目录
+
+`sentinel.yaml` 中目前除了 `service`、`runtime`、`pipeline`，还支持：
+
+- `logging.backend`
+  日志后端，当前支持 `stderr` 和 `syslog`
+- `logging.level`
+  最小输出级别，当前支持 `debug`、`info`、`warn`、`error`
+- `logging.ident`
+  当后端为 `syslog` 时使用的程序标识
+
+例如：
+
+```bash
+./build/dev/video_sentinel config/dev
+./build/prod/video_sentinel config/prod
+```
+
+仓库根目录还保留了一组示例配置模板：
 
 - `config/sentinel.example.yaml`
 - `config/cameras.example.yaml`
 - `config/rules.example.yaml`
+
+它们更适合拿来参考字段格式，不再作为默认运行配置目录。
 
 生产环境中的真实配置建议放在设备本地，例如：
 

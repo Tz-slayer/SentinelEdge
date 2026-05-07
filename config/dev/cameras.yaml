@@ -1,0 +1,17 @@
+cameras:
+  - id: "demo-camera"
+    name: "Demo Camera"
+    type: "mock"
+    uri: "mock://demo"
+    enabled: true
+    width: 1280
+    height: 720
+    fps: 10
+  - id: "usb-camera-0"
+    name: "USB Camera"
+    type: "v4l2"
+    uri: "/dev/video0"
+    enabled: false
+    width: 640
+    height: 480
+    fps: 30

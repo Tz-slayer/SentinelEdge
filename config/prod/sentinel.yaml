@@ -1,0 +1,14 @@
+service:
+  host: "0.0.0.0"
+  port: 8080
+
+logging:
+  backend: "syslog"
+  level: "info"
+  ident: "video_sentinel"
+
+runtime:
+  data_dir: "/var/lib/video-sentinel"
+
+pipeline:
+  max_frames: 300

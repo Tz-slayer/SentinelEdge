@@ -1,0 +1,11 @@
+#pragma once
+
+namespace sentinel {
+
+/**
+ * @brief 返回当前构建预设下的默认配置目录。
+ * @return 由 CMake 在配置阶段写入的默认配置目录字符串。
+ */
+inline constexpr const char* kDefaultConfigDir = "@SENTINEL_DEFAULT_CONFIG_DIR@";
+
+} // namespace sentinel

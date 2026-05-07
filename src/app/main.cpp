@@ -1,9 +1,14 @@
 #include "sentinel/app/linux_signal_fd.hpp"
 #include "sentinel/app/pipeline.hpp"
+#include "sentinel/build/build_config.hpp"
 #include "sentinel/config/config_loader.hpp"
+#include "sentinel/logging/logger_factory.hpp"
+#include "sentinel/logging/stderr_logger.hpp"
 
 #include <exception>
-#include <iostream>
+#include <filesystem>
+#include <memory>
+#include <string>
 
 /**
  * @brief 程序主入口。
@@ -13,44 +18,49 @@
  */
 int main(int argc, char** argv)
 {
-    const auto config_dir = argc > 1 ? argv[1] : "config";
+    const std::filesystem::path config_dir = argc > 1 ? argv[1] : sentinel::kDefaultConfigDir;
+    sentinel::StderrLogger bootstrap_logger(sentinel::LogLevel::kInfo);
 
     try {
         sentinel::LinuxSignalFd signal_fd;
 
         // 先加载配置，再把停止信号回调注入流水线，保证主循环可优雅退出。
         const auto config = sentinel::load_config(config_dir);
-        const auto result = sentinel::run_demo_pipeline(config, [&signal_fd]() {
+        auto logger = sentinel::create_logger(config.logging);
+
+        logger->info("video_sentinel started");
+        logger->info("config_dir: " + config_dir.string());
+#if defined(SENTINEL_ENABLE_DEV_LOGGING) && SENTINEL_ENABLE_DEV_LOGGING
+        logger->info("build_profile: development");
+#else
+        logger->info("build_profile: production");
+#endif
+        logger->info("service: " + config.service.host + ":" + std::to_string(config.service.port));
+        logger->info("camera: " + config.cameras.front().id + " type=" + config.cameras.front().type);
+
+        const auto result = sentinel::run_demo_pipeline(config, *logger, [&signal_fd]() {
             return signal_fd.consume_stop_signal();
         });
 
-        std::cout << "video_sentinel started\n";
-        std::cout << "config_dir: " << config_dir << '\n';
-#if defined(SENTINEL_ENABLE_DEV_LOGGING) && SENTINEL_ENABLE_DEV_LOGGING
-        std::cout << "build_profile: development\n";
-#else
-        std::cout << "build_profile: production\n";
-#endif
-        std::cout << "service: " << config.service.host << ':' << config.service.port << '\n';
-        std::cout << "camera: " << config.cameras.front().id << " (" << config.cameras.front().type
-                      << ")\n";
-        std::cout << "frames_processed: " << result.frames_processed << '\n';
-        std::cout << "detections_seen: " << result.detections_seen << '\n';
-        std::cout << "events_emitted: " << result.events.size() << '\n';
+        logger->info("frames_processed: " + std::to_string(result.frames_processed));
+        logger->info("detections_seen: " + std::to_string(result.detections_seen));
+        logger->info("events_emitted: " + std::to_string(result.events.size()));
 
         for (const auto& event : result.events) {
-            std::cout << "- " << event.id << ' ' << event.type << " camera=" << event.camera_id
-                      << " label=" << event.label << " frames=" << event.start_frame << '-'
-                      << event.end_frame << " confidence=" << event.confidence << '\n';
+            logger->info("event: id=" + event.id + " type=" + event.type + " camera=" +
+                         event.camera_id + " label=" + event.label + " frames=" +
+                         std::to_string(event.start_frame) + "-" +
+                         std::to_string(event.end_frame) + " confidence=" +
+                         std::to_string(event.confidence));
         }
 
         if (result.frames_processed < config.service.max_frames) {
-            std::cout << "shutdown: received stop signal\n";
+            logger->warn("shutdown before reaching configured max_frames");
         }
 
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "video_sentinel failed: " << error.what() << '\n';
+        bootstrap_logger.error("video_sentinel failed: " + std::string(error.what()));
         return 1;
     }
 }

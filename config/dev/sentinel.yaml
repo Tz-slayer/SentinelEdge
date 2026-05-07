@@ -1,0 +1,14 @@
+service:
+  host: "0.0.0.0"
+  port: 8080
+
+logging:
+  backend: "stderr"
+  level: "debug"
+  ident: "video_sentinel_dev"
+
+runtime:
+  data_dir: "./data/dev"
+
+pipeline:
+  max_frames: 5

@@ -31,10 +31,11 @@ void expect(bool condition, std::string_view message)
  */
 int main(int argc, char** argv)
 {
-    const auto config_dir = argc > 1 ? argv[1] : "config";
+    const auto config_dir = argc > 1 ? argv[1] : "config/dev";
 
     const auto config = sentinel::load_config(config_dir);
     expect(config.service.port == 8080, "service port should come from config");
+    expect(config.logging.backend == "stderr", "logging backend should come from config");
     expect(!config.cameras.empty(), "at least one camera should be configured");
     expect(config.rules.hold_frames == 2, "event hold frame threshold should come from config");
 
