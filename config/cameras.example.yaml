@@ -1,0 +1,9 @@
+cameras:
+  - id: "demo-camera"
+    name: "Demo Camera"
+    type: "mock"
+    uri: "mock://demo"
+    enabled: true
+    width: 1280
+    height: 720
+    fps: 10

@@ -1,0 +1,56 @@
+# Build outputs
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+Testing/
+
+# Binaries and object files
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.o
+*.obj
+*.out
+
+# Runtime data
+data/*
+!data/README.md
+!data/.gitkeep
+
+# Model artifacts
+models/**/*.onnx
+models/**/*.bin
+models/**/*.param
+models/**/*.rknn
+models/**/*.om
+models/**/*.engine
+models/**/*.tflite
+models/**/*.pt
+models/**/*.pth
+models/**/*.weights
+
+# Local configs and secrets
+config/*.yaml
+!config/*.example.yaml
+*.env
+.env.*
+
+# Logs
+*.log
+logs/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Node/Web
+web/node_modules/
+web/dist/
+web/.vite/
+web/.next/
