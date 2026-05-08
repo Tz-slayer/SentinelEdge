@@ -21,7 +21,7 @@
 - `models/`：模型放置说明
 - `data/`：本地运行数据目录
 
-当前 C++ 程序使用 mock 视频源和 mock 检测器，先验证工程结构、配置加载、事件生成和命令行输出。真实 RTSP、Orange Pi AI Pro 推理后端、HTTP API 和 Web 看板将在后续迭代中接入。
+当前 C++ 程序已经接入 V4L2 摄像头、AscendCL 推理后端骨架、日志策略和部署包生成流程。mock 输入只保留给本机单元测试夹具，开发板调试配置不再使用 mock。
 
 ## 构建要求
 
@@ -39,8 +39,15 @@ ctest --test-dir build --output-on-failure
 
 ## 开发与生产构建
 
-本项目不维护两份 `CMakeLists.txt`。  
-开发阶段和生产阶段的区别通过 **一套工程定义 + 多组构建开关 + CMake Preset** 来管理。
+本项目不维护两份 `CMakeLists.txt`。
+当前的阶段划分是：
+
+- `dev`：本机 x86_64 测试构建，用 `tests/fixtures/mock_config` 跑单元测试。
+- `board-debug`：本机交叉编译 aarch64 Debug 产物，部署到测试开发板调试，使用真实 V4L2 和 AscendCL。
+- `board-native-debug`：在开发板本机编译 Debug 产物，源码路径天然匹配 GDB，适合深入单步调试。
+- `prod`：本机交叉编译 aarch64 Release 产物，部署到开发板上运行。
+
+开发板不负责源码编译，只接收本机编译出的可执行文件、配置和模型。
 
 ### 当前构建开关
 
@@ -54,10 +61,12 @@ ctest --test-dir build --output-on-failure
   是否启用开发阶段运行时标识输出
 - `ENABLE_SANITIZERS`
   是否启用 AddressSanitizer 和 UndefinedBehaviorSanitizer
+- `ENABLE_ASCENDCL`
+  是否编译 AscendCL 推理后端；开发机可以关闭，部署到 Orange Pi AI Pro 时启用
 
 ### 推荐使用方式
 
-开发构建：
+本机开发构建：
 
 ```bash
 cmake --preset dev
@@ -73,28 +82,184 @@ cmake --build --preset asan
 ctest --preset asan
 ```
 
-生产构建：
+测试开发板调试构建：
+
+```bash
+cmake --preset board-debug
+cmake --build --preset board-debug
+cmake --install build/board-debug
+```
+
+开发板本机调试构建：
+
+```bash
+cmake --preset board-native-debug
+cmake --build --preset board-native-debug
+cmake --install build/board-native-debug
+```
+
+`board-native-debug` 不使用交叉编译工具链，默认使用开发板上的 Ascend Toolkit：
+
+```text
+/usr/local/Ascend/ascend-toolkit/8.0.0/aarch64-linux
+```
+
+该路径下必须存在：
+
+```text
+/usr/local/Ascend/ascend-toolkit/8.0.0/aarch64-linux/include/acl/acl.h
+```
+
+`libascendcl.so` 会从以下常见目录自动查找：
+
+```text
+${ASCENDCL_ROOT}/lib64
+${ASCENDCL_ROOT}/lib
+${ASCENDCL_ROOT}/devlib/linux/aarch64
+${ASCENDCL_ROOT}/devlib/aarch64
+${ASCENDCL_ROOT}/devlib
+```
+
+如果你的库目录不在这些位置，可以显式指定：
+
+```bash
+cmake --preset board-native-debug \
+  -DASCENDCL_LIB_DIR=/your/actual/lib/dir
+```
+
+本机交叉编译部署构建：
 
 ```bash
 cmake --preset prod
 cmake --build --preset prod
 ```
 
+`prod` preset 会在本机使用 `cmake/toolchains/aarch64-linux-gnu.cmake`
+和 `aarch64-linux-gnu-g++` 生成 aarch64 可执行文件。开发板只需要接收构建产物并运行。
+
+如果你的工具链前缀不同，可以显式覆盖：
+
+```bash
+cmake --preset prod -DAARCH64_TOOLCHAIN_PREFIX=<your-prefix>
+cmake --build --preset prod
+```
+
+生成部署目录：
+
+```bash
+cmake --install build/prod
+```
+
+默认会把可执行文件和生产配置安装到：
+
+```text
+build/prod-package/
+```
+
+部署包目录包含：
+
+- `bin/`
+  生产可执行文件，例如 `video_sentinel` 和 `sentinel_camera_probe`
+- `config/`
+  完整配置目录，包含 `config/dev`、`config/prod` 和示例配置
+- `models/`
+  模型目录，目前只自动打包 `.om` 文件，不打包 `.onnx`、`.pt` 等训练或转换中间产物
+
+### Docker Compose 交叉编译
+
+如果本机交叉编译器版本过新，可能会生成依赖 `GLIBC_2.38`、`GLIBCXX_3.4.32`
+等新版运行库符号的 aarch64 程序，而 Orange Pi AI Pro 当前系统只有
+`GLIBC 2.35`。这种情况下应使用 Ubuntu 22.04 容器进行生产构建，让构建环境和板端
+运行库版本保持一致。
+
+本项目提供了 `compose.yaml` 和 `docker/cross-aarch64-ubuntu22.04/Dockerfile`。
+它们只用于构建 aarch64 部署包，不会在本机运行 aarch64 可执行文件。
+
+构建镜像并生成生产部署包：
+
+```bash
+docker compose run --rm --build prod-aarch64-builder
+```
+
+构建镜像并生成测试开发板调试包：
+
+```bash
+docker compose run --rm --build board-debug-aarch64-builder
+```
+
+生产构建服务会在容器内执行：
+
+- `rm -rf build/prod build/prod-package`
+- `cmake --preset prod`
+- `cmake --build --preset prod`
+- `cmake --install build/prod`
+- `file` 检查产物架构
+- `aarch64-linux-gnu-readelf` 检查 GLIBC / GLIBCXX 版本需求
+
+最终产物仍然输出到宿主机仓库内：
+
+```text
+build/prod-package/
+```
+
+测试开发板调试包输出到：
+
+```text
+build/board-debug-package/
+```
+
+调试包会额外包含：
+
+- `source/`
+  精简源码快照，用于 GDB 显示源码和按源码行单步
+- `debug/gdbinit`
+  GDB 初始化脚本，内置 `/work -> ./source` 的源码路径映射
+
+在开发板上可以这样启动 GDB：
+
+```bash
+cd ~/board-debug-package
+gdb -x debug/gdbinit --args ./bin/video_sentinel config/dev
+```
+
+如果 `models/yolo/yolo26n.om` 存在，部署包中会生成：
+
+```text
+build/prod-package/models/yolo/yolo26n.om
+```
+
+这样 `config/prod/sentinel.yaml` 里的相对路径 `models/yolo/yolo26n.om`
+在开发板上仍然可以从 `~/prod-package` 目录直接解析。
+
+如果只想查看 Compose 展开后的实际配置，可以运行：
+
+```bash
+docker compose config
+```
+
 ### 当前 preset 的行为差异
 
 - `dev`
-  `Debug` 构建，开启测试、mock 视频源、开发日志
+  本机 `Debug` 测试构建，默认读取 `tests/fixtures/mock_config`；mock 仅用于本机单元测试
 - `asan`
   在 `dev` 基础上额外开启 sanitizers
+- `board-debug`
+  本机交叉编译 aarch64 `Debug`，关闭测试和 mock，开启 AscendCL 推理后端，默认读取 `config/dev`
+- `board-native-debug`
+  开发板本机 `Debug` 构建，关闭测试和 mock，开启 AscendCL 推理后端，默认读取 `config/dev`
 - `prod`
-  `Release` 构建，关闭测试、关闭 mock 视频源、关闭开发日志
+  本机交叉编译 aarch64 `Release`，关闭测试和 mock，开启 AscendCL 推理后端
 
 ### 生产构建需要注意
 
-`prod` preset 默认关闭了 mock 视频源，因此：
+`prod` preset 是部署构建，不是在开发板上构建。它默认关闭 mock 视频源，并启用 AscendCL，因此：
 
 - 生产构建不会编译 `sentinel_tests`
 - 若运行时仍然使用 `type: "mock"` 的摄像头配置，工厂会拒绝创建该视频源
+- 本机构建时必须能访问 `ASCENDCL_ROOT/include/acl/acl.h` 和 `ASCENDCL_LIB_DIR/libascendcl.so`
+- 当前默认 `ASCENDCL_ROOT` 是 `third_party/ascend-cann/8.0.0`
+- 当前默认 `ASCENDCL_LIB_DIR` 是 `third_party/ascend-cann/8.0.0/devlib/linux/aarch64`
+- 开发板运行时也必须能找到 AscendCL 运行时依赖，可以通过系统安装路径或 `LD_LIBRARY_PATH` 指向板端库目录
 
 这意味着开发配置和生产配置必须分开管理。
 
@@ -261,13 +426,17 @@ cmake --build build
 当前仓库提供两套实际配置目录：
 
 - `config/dev/`
-  面向开发和测试，默认启用 `mock` 摄像头，便于在没有真实设备时跑通流程
+  面向测试开发板调试，默认启用 `v4l2` 摄像头和 `ascendcl` 推理，日志输出到 `stderr`
 - `config/prod/`
-  面向生产构建，默认启用 `v4l2` 摄像头，禁用 mock 输入
+  面向生产部署，默认启用 `v4l2` 摄像头和 `ascendcl` 推理，日志输出到 `syslog`
+- `tests/fixtures/mock_config/`
+  仅用于本机单元测试，保留 mock 摄像头和 mock 推理
 
 默认加载规则：
 
-- `dev` / `asan` preset 构建出的程序默认读取 `config/dev`
+- `dev` / `asan` preset 主要用于本机单元测试，测试命令显式读取 `tests/fixtures/mock_config`
+- `board-debug` preset 构建出的程序默认读取 `config/dev`
+- `board-native-debug` preset 构建出的程序默认读取 `config/dev`
 - `prod` preset 构建出的程序默认读取 `config/prod`
 - 你仍然可以通过命令行参数显式指定配置目录
 
@@ -279,11 +448,18 @@ cmake --build build
   最小输出级别，当前支持 `debug`、`info`、`warn`、`error`
 - `logging.ident`
   当后端为 `syslog` 时使用的程序标识
+- `inference.backend`
+  推理后端，当前支持 `mock` 和 `ascendcl`
+- `inference.model_path`
+  `.om` 模型路径，AscendCL 后端会加载该文件
+- `inference.device_id`
+  AscendCL 设备编号，单设备通常为 `0`
 
 例如：
 
 ```bash
-./build/dev/video_sentinel config/dev
+./build/board-debug/video_sentinel config/dev
+./build/board-native-debug/video_sentinel config/dev
 ./build/prod/video_sentinel config/prod
 ```
 

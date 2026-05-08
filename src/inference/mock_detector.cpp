@@ -14,11 +14,28 @@ MockDetector::MockDetector(RuleConfig rules)
 }
 
 /**
+ * @brief 初始化模拟检测器。
+ * @return 固定返回 `true`。
+ */
+bool MockDetector::open()
+{
+    last_error_.clear();
+    return true;
+}
+
+/**
+ * @brief 关闭模拟检测器。
+ */
+void MockDetector::close() noexcept
+{
+}
+
+/**
  * @brief 为一帧数据生成稳定的模拟检测结果。
  * @param frame 当前帧元数据。
  * @return 模拟检测结果列表。
  */
-std::vector<Detection> MockDetector::detect(const Frame& frame) const
+std::vector<Detection> MockDetector::detect(const Frame& frame)
 {
     std::vector<Detection> detections;
 
@@ -45,6 +62,24 @@ std::vector<Detection> MockDetector::detect(const Frame& frame) const
     }
 
     return detections;
+}
+
+/**
+ * @brief 返回检测器类型标识。
+ * @return 固定返回 `"mock"`。
+ */
+std::string_view MockDetector::kind() const noexcept
+{
+    return "mock";
+}
+
+/**
+ * @brief 返回最近一次错误文本。
+ * @return 当前实现始终返回空字符串。
+ */
+std::string_view MockDetector::last_error() const noexcept
+{
+    return last_error_;
 }
 
 /**

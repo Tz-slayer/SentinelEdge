@@ -18,8 +18,8 @@
     {
       "name": "dev",
       "inherits": "base",
-      "displayName": "Development",
-      "description": "Debug build with tests, mock sources, and development logging enabled.",
+      "displayName": "Host Unit Tests",
+      "description": "Host x86_64 test build that uses mock fixtures only for local unit tests.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "ENABLE_TESTS": "ON",
@@ -27,7 +27,8 @@
         "ENABLE_DEV_WARNINGS": "ON",
         "ENABLE_DEV_LOGGING": "ON",
         "ENABLE_SANITIZERS": "OFF",
-        "SENTINEL_DEFAULT_CONFIG_DIR": "config/dev"
+        "ENABLE_ASCENDCL": "OFF",
+        "SENTINEL_DEFAULT_CONFIG_DIR": "tests/fixtures/mock_config"
       }
     },
     {
@@ -40,17 +41,61 @@
       }
     },
     {
+      "name": "board-debug",
+      "inherits": "base",
+      "displayName": "Board Debug Deployment",
+      "description": "Host-side cross-compiled aarch64 debug build for deploying to the development board.",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/aarch64-linux-gnu.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/board-debug-package",
+        "ENABLE_TESTS": "OFF",
+        "ENABLE_MOCK_SOURCES": "OFF",
+        "ENABLE_DEV_WARNINGS": "ON",
+        "ENABLE_DEV_LOGGING": "ON",
+        "ENABLE_SANITIZERS": "OFF",
+        "ENABLE_ASCENDCL": "ON",
+        "INSTALL_DEBUG_SOURCE": "ON",
+        "ASCENDCL_LIB_DIR": "${sourceDir}/third_party/ascend-cann/8.0.0/devlib/linux/aarch64",
+        "SENTINEL_DEFAULT_CONFIG_DIR": "config/dev"
+      }
+    },
+    {
+      "name": "board-native-debug",
+      "inherits": "base",
+      "displayName": "Board Native Debug",
+      "description": "Native aarch64 debug build on the development board with the board-installed Ascend Toolkit.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/board-native-debug-package",
+        "ENABLE_TESTS": "OFF",
+        "ENABLE_MOCK_SOURCES": "OFF",
+        "ENABLE_DEV_WARNINGS": "ON",
+        "ENABLE_DEV_LOGGING": "ON",
+        "ENABLE_SANITIZERS": "OFF",
+        "ENABLE_ASCENDCL": "ON",
+        "INSTALL_DEBUG_SOURCE": "OFF",
+        "ASCENDCL_ROOT": "/usr/local/Ascend/ascend-toolkit/8.0.0/aarch64-linux",
+        "SENTINEL_DEFAULT_CONFIG_DIR": "config/dev"
+      }
+    },
+    {
       "name": "prod",
       "inherits": "base",
-      "displayName": "Production",
-      "description": "Release build without tests, mock sources, or development logging.",
+      "displayName": "Production Deployment",
+      "description": "Host-side cross-compiled aarch64 release build for deployment to the board.",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/aarch64-linux-gnu.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/prod-package",
         "ENABLE_TESTS": "OFF",
         "ENABLE_MOCK_SOURCES": "OFF",
         "ENABLE_DEV_WARNINGS": "ON",
         "ENABLE_DEV_LOGGING": "OFF",
         "ENABLE_SANITIZERS": "OFF",
+        "ENABLE_ASCENDCL": "ON",
+        "INSTALL_DEBUG_SOURCE": "OFF",
+        "ASCENDCL_LIB_DIR": "${sourceDir}/third_party/ascend-cann/8.0.0/devlib/linux/aarch64",
         "SENTINEL_DEFAULT_CONFIG_DIR": "config/prod"
       }
     }
@@ -63,6 +108,14 @@
     {
       "name": "asan",
       "configurePreset": "asan"
+    },
+    {
+      "name": "board-debug",
+      "configurePreset": "board-debug"
+    },
+    {
+      "name": "board-native-debug",
+      "configurePreset": "board-native-debug"
     },
     {
       "name": "prod",

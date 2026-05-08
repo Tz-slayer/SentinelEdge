@@ -1,0 +1,50 @@
+name: edge-ai-video-sentinel
+
+services:
+  board-debug-aarch64-builder:
+    build:
+      context: .
+      dockerfile: docker/cross-aarch64-ubuntu22.04/Dockerfile
+    image: edge-ai-video-sentinel/aarch64-builder:ubuntu22.04
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /work
+    volumes:
+      - .:/work
+    environment:
+      CMAKE_BUILD_PARALLEL_LEVEL: "${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
+    command:
+      - bash
+      - -lc
+      - |
+        set -eu
+        rm -rf build/board-debug build/board-debug-package
+        cmake --preset board-debug
+        cmake --build --preset board-debug
+        cmake --install build/board-debug
+        file build/board-debug/video_sentinel build/board-debug/sentinel_camera_probe
+        aarch64-linux-gnu-readelf --version-info build/board-debug/sentinel_camera_probe \
+          | grep -E 'GLIBC_|GLIBCXX_' || true
+
+  prod-aarch64-builder:
+    build:
+      context: .
+      dockerfile: docker/cross-aarch64-ubuntu22.04/Dockerfile
+    image: edge-ai-video-sentinel/aarch64-builder:ubuntu22.04
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /work
+    volumes:
+      - .:/work
+    environment:
+      CMAKE_BUILD_PARALLEL_LEVEL: "${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
+    command:
+      - bash
+      - -lc
+      - |
+        set -eu
+        rm -rf build/prod build/prod-package
+        cmake --preset prod
+        cmake --build --preset prod
+        cmake --install build/prod
+        file build/prod/video_sentinel build/prod/sentinel_camera_probe
+        aarch64-linux-gnu-readelf --version-info build/prod/sentinel_camera_probe \
+          | grep -E 'GLIBC_|GLIBCXX_' || true

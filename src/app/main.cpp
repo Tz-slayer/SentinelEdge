@@ -38,6 +38,7 @@ int main(int argc, char** argv)
         logger->info("service: " + config.service.host + ":" + std::to_string(config.service.port));
         logger->info("camera: " + config.cameras.front().id + " type=" + config.cameras.front().type);
 
+        // demo 示例 pipeline
         const auto result = sentinel::run_demo_pipeline(config, *logger, [&signal_fd]() {
             return signal_fd.consume_stop_signal();
         });

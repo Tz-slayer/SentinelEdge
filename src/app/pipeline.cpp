@@ -1,7 +1,7 @@
 #include "sentinel/app/pipeline.hpp"
 
 #include "sentinel/analytics/event_builder.hpp"
-#include "sentinel/inference/mock_detector.hpp"
+#include "sentinel/inference/detector_factory.hpp"
 #include "sentinel/video/video_source_factory.hpp"
 
 #include <string>
@@ -119,7 +119,15 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
         throw std::runtime_error(error_message);
     }
 
-    const MockDetector detector(config.rules);
+    auto detector = create_detector(config.inference, config.rules);
+    if (!detector->open()) {
+        const auto error_message = "unable to open " + std::string(detector->kind()) +
+                                   " detector: " + std::string(detector->last_error());
+        logger.error(error_message);
+        video_source.close();
+        throw std::runtime_error(error_message);
+    }
+
     EventBuilder event_builder(config.rules);
 
     PipelineResult result;
@@ -142,7 +150,11 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
             break;
         }
 
-        const auto detections = detector.detect(*frame);
+        const auto detections = detector->detect(*frame);
+        if (!detector->last_error().empty()) {
+            logger.error("detector failed: " + std::string(detector->last_error()));
+            break;
+        }
         result.frames_processed += 1;
         result.detections_seen += static_cast<int>(detections.size());
 
@@ -150,6 +162,7 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
         result.events.insert(result.events.end(), events.begin(), events.end());
     }
 
+    detector->close();
     video_source.close();
     logger.info("pipeline finished frames=" + std::to_string(result.frames_processed) +
                 " detections=" + std::to_string(result.detections_seen) +

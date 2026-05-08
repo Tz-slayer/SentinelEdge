@@ -23,8 +23,47 @@ option(ENABLE_MOCK_SOURCES "Build mock video source strategies" ON)
 option(ENABLE_DEV_WARNINGS "Enable extra compiler warnings" ON)
 option(ENABLE_DEV_LOGGING "Enable development-oriented runtime logging" ON)
 option(ENABLE_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
+option(ENABLE_ASCENDCL "Build AscendCL inference backend" OFF)
+option(INSTALL_DEBUG_SOURCE "Install a compact source snapshot for board-side GDB debugging" OFF)
 
 set(SENTINEL_DEFAULT_CONFIG_DIR "config/prod" CACHE STRING "Default runtime config directory")
+set(ASCENDCL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ascend-cann/8.0.0" CACHE PATH "AscendCL CANN root directory")
+set(ASCENDCL_LIB_DIR "" CACHE PATH "Optional AscendCL library directory")
+
+if(ENABLE_ASCENDCL)
+    if(NOT EXISTS "${ASCENDCL_ROOT}/include/acl/acl.h")
+        message(FATAL_ERROR
+            "ENABLE_ASCENDCL=ON requires ${ASCENDCL_ROOT}/include/acl/acl.h. "
+            "Set ASCENDCL_ROOT to the toolkit architecture root, for example "
+            "/usr/local/Ascend/ascend-toolkit/8.0.0/aarch64-linux"
+        )
+    endif()
+
+    set(ASCENDCL_LIBRARY_SEARCH_PATHS)
+    if(ASCENDCL_LIB_DIR)
+        list(APPEND ASCENDCL_LIBRARY_SEARCH_PATHS "${ASCENDCL_LIB_DIR}")
+    endif()
+    list(APPEND ASCENDCL_LIBRARY_SEARCH_PATHS
+        "${ASCENDCL_ROOT}/devlib/linux/aarch64"
+        "${ASCENDCL_ROOT}/devlib/aarch64"
+        "${ASCENDCL_ROOT}/devlib"
+        "${ASCENDCL_ROOT}/lib64"
+        "${ASCENDCL_ROOT}/lib"
+    )
+    list(REMOVE_DUPLICATES ASCENDCL_LIBRARY_SEARCH_PATHS)
+
+    find_library(ASCENDCL_LIBRARY ascendcl PATHS ${ASCENDCL_LIBRARY_SEARCH_PATHS} NO_DEFAULT_PATH)
+    if(NOT ASCENDCL_LIBRARY)
+        message(FATAL_ERROR
+            "ENABLE_ASCENDCL=ON requires libascendcl.so. "
+            "Searched: ${ASCENDCL_LIBRARY_SEARCH_PATHS}. "
+            "Set ASCENDCL_LIB_DIR explicitly if your toolkit uses a different layout."
+        )
+    endif()
+
+    get_filename_component(ASCENDCL_RESOLVED_LIB_DIR "${ASCENDCL_LIBRARY}" DIRECTORY)
+    set(ASCENDCL_LIB_DIR "${ASCENDCL_RESOLVED_LIB_DIR}" CACHE PATH "Resolved AscendCL library directory" FORCE)
+endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated/include/sentinel/build)
 
@@ -41,6 +80,7 @@ target_compile_definitions(sentinel_project_options
     INTERFACE
         SENTINEL_ENABLE_DEV_LOGGING=$<IF:$<BOOL:${ENABLE_DEV_LOGGING}>,1,0>
         SENTINEL_ENABLE_MOCK_SOURCES=$<IF:$<BOOL:${ENABLE_MOCK_SOURCES}>,1,0>
+        SENTINEL_ENABLE_ASCENDCL=$<IF:$<BOOL:${ENABLE_ASCENDCL}>,1,0>
 )
 
 if(ENABLE_DEV_WARNINGS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -73,6 +113,7 @@ set(SENTINEL_CORE_SOURCES
     src/app/pipeline.cpp
     src/analytics/event_builder.cpp
     src/config/config_loader.cpp
+    src/inference/detector_factory.cpp
     src/inference/mock_detector.cpp
     src/logging/logger.cpp
     src/logging/logger_factory.cpp
@@ -82,6 +123,16 @@ set(SENTINEL_CORE_SOURCES
     src/video/rtsp_video_source.cpp
     src/video/video_source_factory.cpp
 )
+
+if(ENABLE_ASCENDCL)
+    list(APPEND SENTINEL_CORE_SOURCES
+        src/inference/ascendcl_detector.cpp
+    )
+else()
+    list(APPEND SENTINEL_CORE_SOURCES
+        src/inference/ascendcl_detector_stub.cpp
+    )
+endif()
 
 if(ENABLE_MOCK_SOURCES)
     list(APPEND SENTINEL_CORE_SOURCES
@@ -104,6 +155,29 @@ target_link_libraries(sentinel_core
         sentinel_project_options
 )
 
+if(ENABLE_ASCENDCL)
+    target_include_directories(sentinel_core
+        PUBLIC
+            ${ASCENDCL_ROOT}/include
+    )
+
+    target_link_directories(sentinel_core
+        PUBLIC
+            ${ASCENDCL_LIB_DIR}
+    )
+
+    target_link_libraries(sentinel_core
+        PUBLIC
+            ${ASCENDCL_LIBRARY}
+    )
+
+    set_target_properties(sentinel_core
+        PROPERTIES
+            BUILD_RPATH "${ASCENDCL_LIB_DIR}"
+            INSTALL_RPATH "${ASCENDCL_LIB_DIR}"
+    )
+endif()
+
 add_executable(video_sentinel
     src/app/main.cpp
 )
@@ -122,6 +196,56 @@ target_link_libraries(sentinel_camera_probe
         sentinel_core
 )
 
+install(
+    TARGETS
+        video_sentinel
+        sentinel_camera_probe
+    RUNTIME DESTINATION bin
+)
+
+install(
+    DIRECTORY
+        ${CMAKE_CURRENT_SOURCE_DIR}/config/
+    DESTINATION config
+)
+
+install(
+    DIRECTORY
+        ${CMAKE_CURRENT_SOURCE_DIR}/models/
+    DESTINATION models
+    FILES_MATCHING
+        PATTERN "*.om"
+)
+
+if(INSTALL_DEBUG_SOURCE)
+    install(
+        FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+            ${CMAKE_CURRENT_SOURCE_DIR}/CMakePresets.json
+        DESTINATION source
+    )
+
+    install(
+        DIRECTORY
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        DESTINATION source
+        PATTERN "CMakeFiles" EXCLUDE
+        PATTERN "Testing" EXCLUDE
+        PATTERN ".venv" EXCLUDE
+        PATTERN ".venv.broken" EXCLUDE
+    )
+
+    install(
+        FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/cmake/gdbinit.in
+        DESTINATION debug
+        RENAME gdbinit
+    )
+endif()
+
 if(ENABLE_TESTS)
     enable_testing()
 
@@ -137,7 +261,7 @@ if(ENABLE_TESTS)
 
         add_test(
             NAME sentinel.pipeline_smoke
-            COMMAND sentinel_tests ${CMAKE_CURRENT_SOURCE_DIR}/config/dev
+            COMMAND sentinel_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mock_config
         )
     endif()
 
@@ -182,6 +306,22 @@ if(ENABLE_TESTS)
         NAME sentinel.logging
         COMMAND sentinel_logging_tests
     )
+
+    if(ENABLE_MOCK_SOURCES)
+        add_executable(sentinel_detector_tests
+            tests/unit/detector_factory_test.cpp
+        )
+
+        target_link_libraries(sentinel_detector_tests
+            PRIVATE
+                sentinel_core
+        )
+
+        add_test(
+            NAME sentinel.detector_factory
+            COMMAND sentinel_detector_tests
+        )
+    endif()
 endif()
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
@@ -190,4 +330,9 @@ message(STATUS "ENABLE_MOCK_SOURCES=${ENABLE_MOCK_SOURCES}")
 message(STATUS "ENABLE_DEV_WARNINGS=${ENABLE_DEV_WARNINGS}")
 message(STATUS "ENABLE_DEV_LOGGING=${ENABLE_DEV_LOGGING}")
 message(STATUS "ENABLE_SANITIZERS=${ENABLE_SANITIZERS}")
+message(STATUS "ENABLE_ASCENDCL=${ENABLE_ASCENDCL}")
+message(STATUS "INSTALL_DEBUG_SOURCE=${INSTALL_DEBUG_SOURCE}")
+message(STATUS "ASCENDCL_ROOT=${ASCENDCL_ROOT}")
+message(STATUS "ASCENDCL_LIB_DIR=${ASCENDCL_LIB_DIR}")
+message(STATUS "ASCENDCL_LIBRARY=${ASCENDCL_LIBRARY}")
 message(STATUS "SENTINEL_DEFAULT_CONFIG_DIR=${SENTINEL_DEFAULT_CONFIG_DIR}")

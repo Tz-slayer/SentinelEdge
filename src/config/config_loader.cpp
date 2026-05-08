@@ -186,6 +186,12 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             config.logging.level = value;
         } else if (section == "logging" && key == "ident") {
             config.logging.ident = value;
+        } else if (section == "inference" && key == "backend") {
+            config.inference.backend = value;
+        } else if (section == "inference" && key == "model_path") {
+            config.inference.model_path = value;
+        } else if (section == "inference" && key == "device_id") {
+            config.inference.device_id = std::stoi(value);
         } else if (section == "runtime" && key == "data_dir") {
             config.service.data_dir = value;
         } else if (section == "pipeline" && key == "max_frames") {
@@ -330,6 +336,15 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     }
     if (config.logging.level.empty()) {
         throw std::runtime_error("logging.level must not be empty");
+    }
+    if (config.inference.backend.empty()) {
+        throw std::runtime_error("inference.backend must not be empty");
+    }
+    if (config.inference.backend == "ascendcl" && config.inference.model_path.empty()) {
+        throw std::runtime_error("inference.model_path must not be empty when using AscendCL");
+    }
+    if (config.inference.device_id < 0) {
+        throw std::runtime_error("inference.device_id must not be negative");
     }
     if (config.rules.hold_frames <= 0) {
         throw std::runtime_error("events.hold_frames must be greater than zero");

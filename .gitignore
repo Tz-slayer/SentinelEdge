@@ -23,11 +23,11 @@ data/*
 !data/.gitkeep
 
 # Model artifacts
+models/**/*.om
 models/**/*.onnx
 models/**/*.bin
 models/**/*.param
 models/**/*.rknn
-models/**/*.om
 models/**/*.engine
 models/**/*.tflite
 models/**/*.pt
@@ -39,6 +39,10 @@ config/*.yaml
 !config/*.example.yaml
 *.env
 .env.*
+
+# Local SDKs
+third_party/*
+!third_party/README.md
 
 # Logs
 *.log

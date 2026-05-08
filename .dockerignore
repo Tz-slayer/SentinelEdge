@@ -1,0 +1,5 @@
+# 交叉编译镜像只需要 Dockerfile 本身；源码在运行容器时通过 bind mount 挂载。
+*
+!docker/
+!docker/cross-aarch64-ubuntu22.04/
+!docker/cross-aarch64-ubuntu22.04/Dockerfile

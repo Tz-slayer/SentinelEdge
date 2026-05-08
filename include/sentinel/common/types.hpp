@@ -27,6 +27,15 @@ struct LoggingConfig {
 };
 
 /**
+ * @brief AI 推理后端运行配置。
+ */
+struct InferenceConfig {
+    std::string backend{"mock"};
+    std::filesystem::path model_path{"models/yolo/yolo26n.om"};
+    int device_id{0};
+};
+
+/**
  * @brief 单路摄像头或视频流输入配置。
  */
 struct CameraConfig {
@@ -56,6 +65,7 @@ struct RuleConfig {
 struct SentinelConfig {
     ServiceConfig service;
     LoggingConfig logging;
+    InferenceConfig inference;
     std::vector<CameraConfig> cameras;
     RuleConfig rules;
 };

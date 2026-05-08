@@ -1,0 +1,3 @@
+set substitute-path /work ./source
+set pagination off
+set print pretty on
