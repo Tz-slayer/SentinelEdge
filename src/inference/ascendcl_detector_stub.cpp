@@ -14,10 +14,12 @@ public:
      * @brief 保存推理配置和规则。
      * @param config 推理后端配置。
      * @param rules 检测过滤规则。
+     * @param postprocess 后处理配置。
      */
-    Impl(InferenceConfig config, RuleConfig rules)
+    Impl(InferenceConfig config, RuleConfig rules, PostprocessConfig postprocess)
         : config_(std::move(config))
         , rules_(std::move(rules))
+        , postprocess_(std::move(postprocess))
     {
     }
 
@@ -59,19 +61,35 @@ public:
         return last_error_;
     }
 
+    /**
+     * @brief 返回占位推理调试摘要。
+     * @return 调试摘要文本。
+     */
+    std::string_view debug_info() const noexcept
+    {
+        return debug_info_;
+    }
+
 private:
     InferenceConfig config_;
     RuleConfig rules_;
+    PostprocessConfig postprocess_;
     std::string last_error_;
+    std::string debug_info_{"AscendCL backend is not enabled at build time"};
 };
 
 /**
  * @brief 构造 AscendCL 检测器占位对象。
  * @param config 推理后端配置。
  * @param rules 检测过滤规则。
+ * @param postprocess 后处理配置。
  */
-AscendClDetector::AscendClDetector(InferenceConfig config, RuleConfig rules)
-    : impl_(std::make_unique<Impl>(std::move(config), std::move(rules)))
+AscendClDetector::AscendClDetector(InferenceConfig config,
+                                   RuleConfig rules,
+                                   PostprocessConfig postprocess)
+    : impl_(std::make_unique<Impl>(std::move(config),
+                                   std::move(rules),
+                                   std::move(postprocess)))
 {
 }
 
@@ -123,6 +141,15 @@ std::string_view AscendClDetector::kind() const noexcept
 std::string_view AscendClDetector::last_error() const noexcept
 {
     return impl_->last_error();
+}
+
+/**
+ * @brief 返回占位推理调试摘要。
+ * @return 调试摘要文本。
+ */
+std::string_view AscendClDetector::debug_info() const noexcept
+{
+    return impl_->debug_info();
 }
 
 } // namespace sentinel

@@ -61,6 +61,9 @@ std::vector<Detection> MockDetector::detect(const TensorBuffer& tensor)
         });
     }
 
+    debug_info_ = "mock detections=" + std::to_string(detections.size()) +
+                  " frame_sequence=" + std::to_string(tensor.frame_sequence) +
+                  " camera_id=" + tensor.camera_id;
     return detections;
 }
 
@@ -80,6 +83,15 @@ std::string_view MockDetector::kind() const noexcept
 std::string_view MockDetector::last_error() const noexcept
 {
     return last_error_;
+}
+
+/**
+ * @brief 返回最近一次模拟推理的调试摘要。
+ * @return 调试摘要文本。
+ */
+std::string_view MockDetector::debug_info() const noexcept
+{
+    return debug_info_;
 }
 
 /**

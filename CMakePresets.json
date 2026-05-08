@@ -29,6 +29,7 @@
         "ENABLE_SANITIZERS": "OFF",
         "ENABLE_ASCENDCL": "OFF",
         "ENABLE_OPENCV_PREPROCESSOR": "ON",
+        "ENABLE_OPENCV_POSTPROCESSOR": "ON",
         "SENTINEL_DEFAULT_CONFIG_DIR": "tests/fixtures/mock_config"
       }
     },
@@ -57,6 +58,7 @@
         "ENABLE_SANITIZERS": "OFF",
         "ENABLE_ASCENDCL": "ON",
         "ENABLE_OPENCV_PREPROCESSOR": "ON",
+        "ENABLE_OPENCV_POSTPROCESSOR": "ON",
         "INSTALL_DEBUG_SOURCE": "ON",
         "ASCENDCL_LIB_DIR": "${sourceDir}/third_party/ascend-cann/8.0.0/devlib/linux/aarch64",
         "SENTINEL_DEFAULT_CONFIG_DIR": "config/dev"
@@ -77,6 +79,7 @@
         "ENABLE_SANITIZERS": "OFF",
         "ENABLE_ASCENDCL": "ON",
         "ENABLE_OPENCV_PREPROCESSOR": "ON",
+        "ENABLE_OPENCV_POSTPROCESSOR": "ON",
         "INSTALL_DEBUG_SOURCE": "OFF",
         "ASCENDCL_ROOT": "/usr/local/Ascend/ascend-toolkit/8.0.0/aarch64-linux",
         "SENTINEL_DEFAULT_CONFIG_DIR": "config/dev"
@@ -98,6 +101,7 @@
         "ENABLE_SANITIZERS": "OFF",
         "ENABLE_ASCENDCL": "ON",
         "ENABLE_OPENCV_PREPROCESSOR": "ON",
+        "ENABLE_OPENCV_POSTPROCESSOR": "ON",
         "INSTALL_DEBUG_SOURCE": "OFF",
         "ASCENDCL_LIB_DIR": "${sourceDir}/third_party/ascend-cann/8.0.0/devlib/linux/aarch64",
         "SENTINEL_DEFAULT_CONFIG_DIR": "config/prod"

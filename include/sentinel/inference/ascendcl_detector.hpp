@@ -21,8 +21,9 @@ public:
      * @brief 使用推理配置和检测规则构造 AscendCL 检测器。
      * @param config 推理后端配置，包含模型路径和设备编号。
      * @param rules 检测过滤规则。
+     * @param postprocess 后处理配置。
      */
-    AscendClDetector(InferenceConfig config, RuleConfig rules);
+    AscendClDetector(InferenceConfig config, RuleConfig rules, PostprocessConfig postprocess);
 
     /**
      * @brief 释放 AscendCL 资源。
@@ -58,6 +59,12 @@ public:
      * @return 若当前没有错误则返回空字符串。
      */
     std::string_view last_error() const noexcept override;
+
+    /**
+     * @brief 返回最近一次 AscendCL 推理的调试摘要。
+     * @return 调试摘要，包含模型输入输出缓冲区大小和输出预览。
+     */
+    std::string_view debug_info() const noexcept override;
 
 private:
     /**

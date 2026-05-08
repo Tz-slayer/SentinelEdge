@@ -38,6 +38,7 @@ int main(int argc, char** argv)
     expect(config.logging.backend == "stderr", "logging backend should come from config");
     expect(config.inference.backend == "mock", "inference backend should come from config");
     expect(config.preprocess.backend == "opencv", "preprocess backend should come from config");
+    expect(config.postprocess.backend == "opencv", "postprocess backend should come from config");
     expect(!config.cameras.empty(), "at least one camera should be configured");
     expect(config.cameras.front().buffer_mode == "copy", "camera buffer mode should come from config");
     expect(config.rules.hold_frames == 2, "event hold frame threshold should come from config");

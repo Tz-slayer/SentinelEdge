@@ -1,6 +1,10 @@
 #include "sentinel/inference/ascendcl_detector.hpp"
 
+#include "sentinel/postprocess/postprocessor_factory.hpp"
+
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <utility>
 
@@ -32,6 +36,33 @@ std::string make_acl_error(std::string_view action, aclError error)
     return std::string(action) + " failed, aclError=" + std::to_string(static_cast<int>(error));
 }
 
+/**
+ * @brief 将字节输出按 FP32 解释并生成少量预览值。
+ * @param output 模型输出的主机侧字节缓冲区。
+ * @param max_values 最多预览的浮点数数量。
+ * @return 形如 `[0.1,0.2]` 的预览文本。
+ */
+std::string preview_fp32_values(const std::vector<std::uint8_t>& output, std::size_t max_values)
+{
+    const auto value_count = output.size() / sizeof(float);
+    const auto preview_count = std::min(value_count, max_values);
+
+    std::string preview{"["};
+    for (std::size_t index = 0; index < preview_count; ++index) {
+        float value = 0.0F;
+        std::memcpy(&value, output.data() + index * sizeof(float), sizeof(float));
+        if (index > 0U) {
+            preview += ",";
+        }
+        preview += std::to_string(value);
+    }
+    if (value_count > preview_count) {
+        preview += ",...";
+    }
+    preview += "]";
+    return preview;
+}
+
 } // namespace
 
 /**
@@ -51,10 +82,12 @@ public:
      * @brief 保存推理配置和检测规则。
      * @param config 推理后端配置。
      * @param rules 检测过滤规则。
+     * @param postprocess 后处理配置。
      */
-    Impl(InferenceConfig config, RuleConfig rules)
+    Impl(InferenceConfig config, RuleConfig rules, PostprocessConfig postprocess)
         : config_(std::move(config))
         , rules_(std::move(rules))
+        , postprocess_config_(std::move(postprocess))
     {
     }
 
@@ -126,6 +159,14 @@ public:
             return false;
         }
 
+        postprocessor_ = create_detection_postprocessor(postprocess_config_, rules_);
+        if (!postprocessor_->open()) {
+            last_error_ = "unable to open " + std::string(postprocessor_->kind()) +
+                          " postprocessor: " + std::string(postprocessor_->last_error());
+            close();
+            return false;
+        }
+
         last_error_.clear();
         return true;
     }
@@ -137,6 +178,10 @@ public:
     {
         destroy_dataset(input_dataset_, input_buffers_);
         destroy_dataset(output_dataset_, output_buffers_);
+        if (postprocessor_) {
+            postprocessor_->close();
+            postprocessor_.reset();
+        }
 
         if (model_desc_ != nullptr) {
             aclmdlDestroyDesc(model_desc_);
@@ -174,6 +219,7 @@ public:
     {
         if (input_buffers_.size() != 1U) {
             last_error_ = "AscendCL detector currently supports exactly one model input";
+            debug_info_ = "detect failed before execute: " + last_error_;
             return {};
         }
 
@@ -181,6 +227,7 @@ public:
             last_error_ = "tensor input bytes mismatch: expected " +
                           std::to_string(input_buffers_.front().size) + ", got " +
                           std::to_string(tensor.data.size());
+            debug_info_ = "detect failed before execute: " + last_error_;
             return {};
         }
 
@@ -191,18 +238,21 @@ public:
                                ACL_MEMCPY_HOST_TO_DEVICE);
         if (!acl_ok(ret)) {
             set_error("aclrtMemcpy(input)", ret);
+            debug_info_ = "detect failed while copying input: " + last_error_;
             return {};
         }
 
         ret = aclmdlExecute(model_id_, input_dataset_, output_dataset_);
         if (!acl_ok(ret)) {
             set_error("aclmdlExecute", ret);
+            debug_info_ = "detect failed during model execute: " + last_error_;
             return {};
         }
 
         raw_outputs_.clear();
         raw_outputs_.reserve(output_buffers_.size());
-        for (const auto& output : output_buffers_) {
+        for (std::size_t index = 0; index < output_buffers_.size(); ++index) {
+            const auto& output = output_buffers_[index];
             std::vector<std::uint8_t> host_output(output.size);
             ret = aclrtMemcpy(host_output.data(),
                               host_output.size(),
@@ -211,14 +261,34 @@ public:
                               ACL_MEMCPY_DEVICE_TO_HOST);
             if (!acl_ok(ret)) {
                 set_error("aclrtMemcpy(output)", ret);
+                debug_info_ = "detect failed while copying output: " + last_error_;
                 return {};
             }
-            raw_outputs_.push_back(std::move(host_output));
+            raw_outputs_.push_back(ModelOutputBuffer{
+                std::move(host_output),
+                {},
+                "FP32",
+                index,
+            });
         }
 
-        // 下一阶段会根据不同 YOLO 输出布局接入后处理策略，这里只验证模型推理链路。
+        if (!postprocessor_) {
+            last_error_ = "postprocessor is not initialized";
+            debug_info_ = "detect failed after execute: " + last_error_;
+            return {};
+        }
+
+        auto detections = postprocessor_->process(raw_outputs_, tensor);
+        if (!postprocessor_->last_error().empty()) {
+            last_error_ = "postprocessor failed: " + std::string(postprocessor_->last_error());
+            debug_info_ = make_debug_summary(tensor) + " " +
+                          std::string(postprocessor_->debug_info());
+            return {};
+        }
+
+        debug_info_ = make_debug_summary(tensor) + " " + std::string(postprocessor_->debug_info());
         last_error_.clear();
-        return {};
+        return detections;
     }
 
     /**
@@ -230,7 +300,40 @@ public:
         return last_error_;
     }
 
+    /**
+     * @brief 返回最近一次推理的调试摘要。
+     * @return 调试摘要文本。
+     */
+    std::string_view debug_info() const noexcept
+    {
+        return debug_info_;
+    }
+
 private:
+    /**
+     * @brief 生成一次 AscendCL 推理后的轻量调试摘要。
+     * @param tensor 本次推理输入张量。
+     * @return 包含输入和输出 buffer 概况的文本。
+     */
+    std::string make_debug_summary(const TensorBuffer& tensor) const
+    {
+        std::string summary = "ascendcl inference frame_sequence=" +
+                              std::to_string(tensor.frame_sequence) +
+                              " camera_id=" + tensor.camera_id +
+                              " input_bytes=" + std::to_string(tensor.data.size()) +
+                              " outputs=" + std::to_string(raw_outputs_.size());
+
+        for (std::size_t index = 0; index < raw_outputs_.size(); ++index) {
+            const auto& output = raw_outputs_[index];
+            summary += " output[" + std::to_string(index) + "].bytes=" +
+                       std::to_string(output.data.size());
+            if (!output.data.empty()) {
+                summary += " fp32_preview=" + preview_fp32_values(output.data, 6);
+            }
+        }
+        return summary;
+    }
+
     /**
      * @brief 创建模型输入输出数据集。
      * @return 成功返回 `true`。
@@ -345,10 +448,13 @@ private:
 
     InferenceConfig config_;
     RuleConfig rules_;
+    PostprocessConfig postprocess_config_;
     std::string last_error_;
+    std::string debug_info_;
     std::vector<DeviceBuffer> input_buffers_;
     std::vector<DeviceBuffer> output_buffers_;
-    std::vector<std::vector<std::uint8_t>> raw_outputs_;
+    std::vector<ModelOutputBuffer> raw_outputs_;
+    std::unique_ptr<DetectionPostprocessor> postprocessor_;
     aclrtContext context_{nullptr};
     aclmdlDesc* model_desc_{nullptr};
     aclmdlDataset* input_dataset_{nullptr};
@@ -364,8 +470,12 @@ private:
  * @param config 推理后端配置。
  * @param rules 检测过滤规则。
  */
-AscendClDetector::AscendClDetector(InferenceConfig config, RuleConfig rules)
-    : impl_(std::make_unique<Impl>(std::move(config), std::move(rules)))
+AscendClDetector::AscendClDetector(InferenceConfig config,
+                                   RuleConfig rules,
+                                   PostprocessConfig postprocess)
+    : impl_(std::make_unique<Impl>(std::move(config),
+                                   std::move(rules),
+                                   std::move(postprocess)))
 {
 }
 
@@ -417,6 +527,15 @@ std::string_view AscendClDetector::kind() const noexcept
 std::string_view AscendClDetector::last_error() const noexcept
 {
     return impl_->last_error();
+}
+
+/**
+ * @brief 返回最近一次 AscendCL 推理的调试摘要。
+ * @return 调试摘要文本。
+ */
+std::string_view AscendClDetector::debug_info() const noexcept
+{
+    return impl_->debug_info();
 }
 
 } // namespace sentinel

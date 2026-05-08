@@ -204,6 +204,27 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             config.preprocess.output_dtype = value;
         } else if (section == "preprocess" && key == "normalize") {
             config.preprocess.normalize = parse_bool(value);
+        } else if (section == "postprocess" && key == "backend") {
+            config.postprocess.backend = value;
+        } else if (section == "postprocess" && key == "model_type") {
+            config.postprocess.model_type = value;
+        } else if (section == "postprocess" && key == "output_layout") {
+            config.postprocess.output_layout = value;
+        } else if (section == "postprocess" && key == "num_classes") {
+            config.postprocess.num_classes = std::stoi(value);
+        } else if (section == "postprocess" && key == "confidence_threshold") {
+            config.postprocess.confidence_threshold = std::stod(value);
+        } else if (section == "postprocess" && key == "nms_iou_threshold") {
+            config.postprocess.nms_iou_threshold = std::stod(value);
+        } else if (section == "postprocess" && key == "max_detections") {
+            config.postprocess.max_detections = std::stoi(value);
+        } else if (section == "postprocess" && key == "merge_coco_vehicles") {
+            config.postprocess.merge_coco_vehicles = parse_bool(value);
+        } else if (section == "postprocess" && key == "class_names") {
+            const auto parsed_names = parse_inline_list(value);
+            if (!parsed_names.empty()) {
+                config.postprocess.class_names = parsed_names;
+            }
         } else if (section == "runtime" && key == "data_dir") {
             config.service.data_dir = value;
         } else if (section == "pipeline" && key == "max_frames") {
@@ -378,6 +399,33 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     }
     if (config.preprocess.output_dtype != "FP32") {
         throw std::runtime_error("preprocess.output_dtype currently supports only FP32");
+    }
+    if (config.postprocess.backend.empty()) {
+        throw std::runtime_error("postprocess.backend must not be empty");
+    }
+    if (config.postprocess.backend != "opencv" && config.postprocess.backend != "dvpp") {
+        throw std::runtime_error("postprocess.backend must be opencv or dvpp");
+    }
+    if (config.postprocess.model_type != "yolo") {
+        throw std::runtime_error("postprocess.model_type currently supports only yolo");
+    }
+    if (config.postprocess.output_layout != "channels_first" &&
+        config.postprocess.output_layout != "anchors_first") {
+        throw std::runtime_error("postprocess.output_layout must be channels_first or anchors_first");
+    }
+    if (config.postprocess.num_classes <= 0) {
+        throw std::runtime_error("postprocess.num_classes must be positive");
+    }
+    if (config.postprocess.confidence_threshold < 0.0 ||
+        config.postprocess.confidence_threshold > 1.0) {
+        throw std::runtime_error("postprocess.confidence_threshold must be in [0, 1]");
+    }
+    if (config.postprocess.nms_iou_threshold < 0.0 ||
+        config.postprocess.nms_iou_threshold > 1.0) {
+        throw std::runtime_error("postprocess.nms_iou_threshold must be in [0, 1]");
+    }
+    if (config.postprocess.max_detections <= 0) {
+        throw std::runtime_error("postprocess.max_detections must be positive");
     }
     if (config.rules.hold_frames <= 0) {
         throw std::runtime_error("events.hold_frames must be greater than zero");

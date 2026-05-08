@@ -23,6 +23,7 @@
 
 当前 C++ 程序已经接入 V4L2 摄像头、AscendCL 推理后端骨架、日志策略和部署包生成流程。mock 输入只保留给本机单元测试夹具，开发板调试配置不再使用 mock。
 图像预处理已经抽象为策略接口，当前可选 `opencv` 和 `dvpp`，其中 `opencv` 已实现软解码、缩放和 NCHW FP32 张量打包，`dvpp` 仍是待实现占位策略。
+模型后处理已经抽象为策略接口，当前 `opencv` 后端支持 YOLO FP32 输出解析、置信度过滤和 OpenCV DNN NMS；`dvpp` 后处理仍是明确的未实现占位。
 摄像头配置已经预留运行期缓冲区模式开关：`buffer_mode: "copy"` 表示稳定的复制模式，`buffer_mode: "loaned"` 预留给后续 V4L2 零拷贝租借缓冲区模式。
 
 ## 构建要求
@@ -68,6 +69,8 @@ ctest --test-dir build --output-on-failure
   是否编译 AscendCL 推理后端；开发机可以关闭，部署到 Orange Pi AI Pro 时启用
 - `ENABLE_OPENCV_PREPROCESSOR`
   是否编译 OpenCV 图像预处理后端；使用当前 `config/dev` 和 `config/prod` 时应保持开启
+- `ENABLE_OPENCV_POSTPROCESSOR`
+  是否编译 OpenCV YOLO 后处理后端；使用当前 `config/dev` 和 `config/prod` 时应保持开启
 
 ### 推荐使用方式
 
@@ -144,6 +147,28 @@ cameras:
 
 当前可运行路径是 `copy`。`loaned` 会被配置系统识别，但 V4L2 源会拒绝启动并提示需要
 `FrameView/FrameLease` 生命周期支持；这是后续实现真正零拷贝对比实验的入口。
+
+YOLO 后处理在 `config/*/sentinel.yaml` 中配置：
+
+```yaml
+postprocess:
+  backend: "opencv"          # opencv / dvpp
+  model_type: "yolo"
+  output_layout: "channels_first"  # channels_first=[1,84,8400], anchors_first=[1,8400,84]
+  num_classes: 80
+  confidence_threshold: 0.25
+  nms_iou_threshold: 0.45
+  max_detections: 100
+  merge_coco_vehicles: true
+```
+
+当前 OpenCV 后处理支持 YOLOv8/YOLO11 常见 FP32 输出形态：
+
+- `channels_first`：属性维在前，例如 `[1, 84, 8400]`
+- `anchors_first`：候选框维在前，例如 `[1, 8400, 84]`
+
+如果开发板日志中 `after_threshold=0`，但 raw output 预览值明显不为空，优先检查
+`output_layout`、`num_classes` 和置信度阈值是否与实际模型一致。
 
 本机交叉编译部署构建：
 

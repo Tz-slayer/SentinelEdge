@@ -9,6 +9,7 @@
 #include <string>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace sentinel {
 namespace {
@@ -50,6 +51,79 @@ TensorBuffer make_metadata_tensor(const Frame& frame)
     tensor.frame_sequence = frame.sequence;
     tensor.camera_id = frame.camera_id;
     return tensor;
+}
+
+/**
+ * @brief 生成 V4L2 fourcc 可读文本。
+ * @param pixel_format 像素格式整数。
+ * @return fourcc 字符串；若格式为 0 则返回 `"unknown"`。
+ */
+std::string pixel_format_to_string(std::uint32_t pixel_format)
+{
+    if (pixel_format == 0U) {
+        return "unknown";
+    }
+
+    std::string value(4, ' ');
+    value[0] = static_cast<char>(pixel_format & 0xFFU);
+    value[1] = static_cast<char>((pixel_format >> 8U) & 0xFFU);
+    value[2] = static_cast<char>((pixel_format >> 16U) & 0xFFU);
+    value[3] = static_cast<char>((pixel_format >> 24U) & 0xFFU);
+    return value;
+}
+
+/**
+ * @brief 将张量形状转换为日志文本。
+ * @param shape 张量维度列表。
+ * @return 形如 `[1,3,640,640]` 的文本。
+ */
+std::string shape_to_string(const std::vector<int>& shape)
+{
+    std::string text{"["};
+    for (std::size_t index = 0; index < shape.size(); ++index) {
+        if (index > 0U) {
+            text += ",";
+        }
+        text += std::to_string(shape[index]);
+    }
+    text += "]";
+    return text;
+}
+
+/**
+ * @brief 生成视频帧调试摘要。
+ * @param frame 视频源输出的帧。
+ * @return 包含尺寸、像素格式和字节数的摘要文本。
+ */
+std::string make_frame_debug_message(const Frame& frame)
+{
+    return "camera frame sequence=" + std::to_string(frame.sequence) +
+           " camera_id=" + frame.camera_id +
+           " size=" + std::to_string(frame.width) + "x" + std::to_string(frame.height) +
+           " pixel_format=" + pixel_format_to_string(frame.pixel_format) +
+           " bytes_used=" + std::to_string(frame.bytes_used) +
+           " data_bytes=" + std::to_string(frame.data.size()) +
+           " timestamp_ns=" + std::to_string(frame.timestamp_ns);
+}
+
+/**
+ * @brief 生成模型输入张量调试摘要。
+ * @param tensor 预处理后的模型输入张量。
+ * @return 包含 shape、layout、dtype 和字节数的摘要文本。
+ */
+std::string make_tensor_debug_message(const TensorBuffer& tensor)
+{
+    if (tensor.shape.empty()) {
+        return "detector metadata frame_sequence=" + std::to_string(tensor.frame_sequence) +
+               " camera_id=" + tensor.camera_id + " tensor=not_required_for_mock";
+    }
+
+    return "preprocess tensor frame_sequence=" + std::to_string(tensor.frame_sequence) +
+           " camera_id=" + tensor.camera_id +
+           " shape=" + shape_to_string(tensor.shape) +
+           " layout=" + tensor.layout +
+           " dtype=" + tensor.dtype +
+           " bytes=" + std::to_string(tensor.data.size());
 }
 
 /**
@@ -162,7 +236,7 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
         }
     }
 
-    auto detector = create_detector(config.inference, config.rules);
+    auto detector = create_detector(config.inference, config.rules, config.postprocess);
     if (!detector->open()) {
         const auto error_message = "unable to open " + std::string(detector->kind()) +
                                    " detector: " + std::string(detector->last_error());
@@ -195,6 +269,7 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
             }
             break;
         }
+        logger.debug(make_frame_debug_message(*frame));
 
         TensorBuffer tensor;
         if (preprocessor) {
@@ -209,11 +284,15 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
         } else {
             tensor = make_metadata_tensor(*frame);
         }
+        logger.debug(make_tensor_debug_message(tensor));
 
         const auto detections = detector->detect(tensor);
         if (!detector->last_error().empty()) {
             logger.error("detector failed: " + std::string(detector->last_error()));
             break;
+        }
+        if (!detector->debug_info().empty()) {
+            logger.debug("detector result: " + std::string(detector->debug_info()));
         }
         result.frames_processed += 1;
         result.detections_seen += static_cast<int>(detections.size());

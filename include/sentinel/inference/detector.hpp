@@ -56,6 +56,12 @@ public:
      */
     virtual std::string_view last_error() const noexcept = 0;
 
+    /**
+     * @brief 返回最近一次推理的调试摘要。
+     * @return 调试摘要；若当前没有可用调试信息则返回空字符串。
+     */
+    virtual std::string_view debug_info() const noexcept = 0;
+
 protected:
     /**
      * @brief 允许派生类默认构造基类。

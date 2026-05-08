@@ -20,6 +20,16 @@ preprocess:
   output_dtype: "FP32"
   normalize: true
 
+postprocess:
+  backend: "opencv"
+  model_type: "yolo"
+  output_layout: "channels_first"
+  num_classes: 80
+  confidence_threshold: 0.25
+  nms_iou_threshold: 0.45
+  max_detections: 100
+  merge_coco_vehicles: true
+
 runtime:
   data_dir: "./data/test"
 

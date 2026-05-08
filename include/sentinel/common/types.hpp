@@ -51,6 +51,24 @@ struct PreprocessConfig {
 };
 
 /**
+ * @brief 目标检测后处理策略运行配置。
+ *
+ * 该配置描述如何把模型原始输出张量解析为 `Detection`。OpenCV 后端
+ * 负责 CPU 侧 YOLO 解码与 NMS，DVPP 后端预留给后续硬件相关实验入口。
+ */
+struct PostprocessConfig {
+    std::string backend{"opencv"};
+    std::string model_type{"yolo"};
+    std::string output_layout{"channels_first"};
+    int num_classes{80};
+    double confidence_threshold{0.25};
+    double nms_iou_threshold{0.45};
+    int max_detections{100};
+    bool merge_coco_vehicles{true};
+    std::vector<std::string> class_names;
+};
+
+/**
  * @brief 单路摄像头或视频流输入配置。
  *
  * `buffer_mode` 用于控制视频帧缓冲区的数据通路：`copy` 表示 V4L2
@@ -86,6 +104,7 @@ struct SentinelConfig {
     LoggingConfig logging;
     InferenceConfig inference;
     PreprocessConfig preprocess;
+    PostprocessConfig postprocess;
     std::vector<CameraConfig> cameras;
     RuleConfig rules;
 };
@@ -128,6 +147,19 @@ struct TensorBuffer {
     std::string dtype;
     int frame_sequence{0};
     std::string camera_id;
+};
+
+/**
+ * @brief 单个模型输出缓冲区。
+ *
+ * `data` 保存从推理后端拷贝回 Host 的原始输出字节；`shape` 若可从推理
+ * 框架获取则保存维度信息，无法获取时允许为空，后处理策略会按配置推断。
+ */
+struct ModelOutputBuffer {
+    std::vector<std::uint8_t> data;
+    std::vector<int> shape;
+    std::string dtype{"FP32"};
+    std::size_t index{0};
 };
 
 /**

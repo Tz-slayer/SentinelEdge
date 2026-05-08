@@ -32,7 +32,8 @@ int main()
     mock_config.backend = "mock";
 
     sentinel::RuleConfig rules;
-    const auto detector = sentinel::create_detector(mock_config, rules);
+    sentinel::PostprocessConfig postprocess;
+    const auto detector = sentinel::create_detector(mock_config, rules, postprocess);
     expect(detector != nullptr, "mock detector should be created");
     expect(detector->kind() == "mock", "mock detector should report mock kind");
     expect(detector->open(), "mock detector should open");
@@ -41,7 +42,7 @@ int main()
     ascend_config.backend = "ascendcl";
     ascend_config.model_path = "models/yolo/yolo26n.om";
 
-    const auto ascend_detector = sentinel::create_detector(ascend_config, rules);
+    const auto ascend_detector = sentinel::create_detector(ascend_config, rules, postprocess);
     expect(ascend_detector != nullptr, "ascendcl detector strategy should be created");
     expect(ascend_detector->kind() == "ascendcl", "ascendcl detector should report ascendcl kind");
 
@@ -50,7 +51,7 @@ int main()
 
     bool invalid_backend_failed = false;
     try {
-        static_cast<void>(sentinel::create_detector(invalid_config, rules));
+        static_cast<void>(sentinel::create_detector(invalid_config, rules, postprocess));
     } catch (const std::exception&) {
         invalid_backend_failed = true;
     }

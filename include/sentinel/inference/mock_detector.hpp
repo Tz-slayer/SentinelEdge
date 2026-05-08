@@ -50,6 +50,12 @@ public:
      */
     std::string_view last_error() const noexcept override;
 
+    /**
+     * @brief 返回最近一次模拟推理的调试摘要。
+     * @return 调试摘要文本。
+     */
+    std::string_view debug_info() const noexcept override;
+
 private:
     /**
      * @brief 判断某个类别是否在规则配置中被启用。
@@ -60,6 +66,7 @@ private:
 
     RuleConfig rules_;
     std::string last_error_;
+    std::string debug_info_;
 };
 
 } // namespace sentinel
