@@ -3,6 +3,7 @@ cameras:
     name: "Mock Camera"
     type: "mock"
     uri: "mock://demo"
+    buffer_mode: "copy"
     enabled: true
     width: 1280
     height: 720

@@ -24,6 +24,7 @@ option(ENABLE_DEV_WARNINGS "Enable extra compiler warnings" ON)
 option(ENABLE_DEV_LOGGING "Enable development-oriented runtime logging" ON)
 option(ENABLE_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
 option(ENABLE_ASCENDCL "Build AscendCL inference backend" OFF)
+option(ENABLE_OPENCV_PREPROCESSOR "Build OpenCV frame preprocessing backend" ON)
 option(INSTALL_DEBUG_SOURCE "Install a compact source snapshot for board-side GDB debugging" OFF)
 
 set(SENTINEL_DEFAULT_CONFIG_DIR "config/prod" CACHE STRING "Default runtime config directory")
@@ -65,6 +66,10 @@ if(ENABLE_ASCENDCL)
     set(ASCENDCL_LIB_DIR "${ASCENDCL_RESOLVED_LIB_DIR}" CACHE PATH "Resolved AscendCL library directory" FORCE)
 endif()
 
+if(ENABLE_OPENCV_PREPROCESSOR)
+    find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
+endif()
+
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated/include/sentinel/build)
 
 configure_file(
@@ -81,6 +86,7 @@ target_compile_definitions(sentinel_project_options
         SENTINEL_ENABLE_DEV_LOGGING=$<IF:$<BOOL:${ENABLE_DEV_LOGGING}>,1,0>
         SENTINEL_ENABLE_MOCK_SOURCES=$<IF:$<BOOL:${ENABLE_MOCK_SOURCES}>,1,0>
         SENTINEL_ENABLE_ASCENDCL=$<IF:$<BOOL:${ENABLE_ASCENDCL}>,1,0>
+        SENTINEL_ENABLE_OPENCV_PREPROCESSOR=$<IF:$<BOOL:${ENABLE_OPENCV_PREPROCESSOR}>,1,0>
 )
 
 if(ENABLE_DEV_WARNINGS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -119,6 +125,8 @@ set(SENTINEL_CORE_SOURCES
     src/logging/logger_factory.cpp
     src/logging/stderr_logger.cpp
     src/logging/syslog_logger.cpp
+    src/preprocess/dvpp_frame_preprocessor.cpp
+    src/preprocess/preprocessor_factory.cpp
     src/video/camera_video_source.cpp
     src/video/rtsp_video_source.cpp
     src/video/video_source_factory.cpp
@@ -131,6 +139,16 @@ if(ENABLE_ASCENDCL)
 else()
     list(APPEND SENTINEL_CORE_SOURCES
         src/inference/ascendcl_detector_stub.cpp
+    )
+endif()
+
+if(ENABLE_OPENCV_PREPROCESSOR)
+    list(APPEND SENTINEL_CORE_SOURCES
+        src/preprocess/opencv_frame_preprocessor.cpp
+    )
+else()
+    list(APPEND SENTINEL_CORE_SOURCES
+        src/preprocess/opencv_frame_preprocessor_stub.cpp
     )
 endif()
 
@@ -175,6 +193,18 @@ if(ENABLE_ASCENDCL)
         PROPERTIES
             BUILD_RPATH "${ASCENDCL_LIB_DIR}"
             INSTALL_RPATH "${ASCENDCL_LIB_DIR}"
+    )
+endif()
+
+if(ENABLE_OPENCV_PREPROCESSOR)
+    target_include_directories(sentinel_core
+        PUBLIC
+            ${OpenCV_INCLUDE_DIRS}
+    )
+
+    target_link_libraries(sentinel_core
+        PUBLIC
+            ${OpenCV_LIBS}
     )
 endif()
 
@@ -322,6 +352,22 @@ if(ENABLE_TESTS)
             COMMAND sentinel_detector_tests
         )
     endif()
+
+    if(ENABLE_OPENCV_PREPROCESSOR)
+        add_executable(sentinel_preprocessor_tests
+            tests/unit/preprocessor_factory_test.cpp
+        )
+
+        target_link_libraries(sentinel_preprocessor_tests
+            PRIVATE
+                sentinel_core
+        )
+
+        add_test(
+            NAME sentinel.preprocessor_factory
+            COMMAND sentinel_preprocessor_tests
+        )
+    endif()
 endif()
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
@@ -331,6 +377,7 @@ message(STATUS "ENABLE_DEV_WARNINGS=${ENABLE_DEV_WARNINGS}")
 message(STATUS "ENABLE_DEV_LOGGING=${ENABLE_DEV_LOGGING}")
 message(STATUS "ENABLE_SANITIZERS=${ENABLE_SANITIZERS}")
 message(STATUS "ENABLE_ASCENDCL=${ENABLE_ASCENDCL}")
+message(STATUS "ENABLE_OPENCV_PREPROCESSOR=${ENABLE_OPENCV_PREPROCESSOR}")
 message(STATUS "INSTALL_DEBUG_SOURCE=${INSTALL_DEBUG_SOURCE}")
 message(STATUS "ASCENDCL_ROOT=${ASCENDCL_ROOT}")
 message(STATUS "ASCENDCL_LIB_DIR=${ASCENDCL_LIB_DIR}")

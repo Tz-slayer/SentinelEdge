@@ -40,12 +40,12 @@ public:
 
     /**
      * @brief 占位推理函数。
-     * @param frame 待推理的视频帧。
+     * @param tensor 预处理后的模型输入张量。
      * @return 固定返回空检测列表。
      */
-    std::vector<Detection> detect(const Frame& frame)
+    std::vector<Detection> detect(const TensorBuffer& tensor)
     {
-        static_cast<void>(frame);
+        static_cast<void>(tensor);
         last_error_ = "AscendCL backend is not enabled at build time";
         return {};
     }
@@ -99,12 +99,12 @@ void AscendClDetector::close() noexcept
 
 /**
  * @brief 执行占位推理。
- * @param frame 待推理的视频帧。
+ * @param tensor 预处理后的模型输入张量。
  * @return 固定返回空检测列表。
  */
-std::vector<Detection> AscendClDetector::detect(const Frame& frame)
+std::vector<Detection> AscendClDetector::detect(const TensorBuffer& tensor)
 {
-    return impl_->detect(frame);
+    return impl_->detect(tensor);
 }
 
 /**

@@ -12,6 +12,14 @@ inference:
   model_path: "models/yolo/yolo26n.om"
   device_id: 0
 
+preprocess:
+  backend: "opencv"
+  output_width: 640
+  output_height: 640
+  output_layout: "NCHW"
+  output_dtype: "FP32"
+  normalize: true
+
 runtime:
   data_dir: "./data/dev"
 

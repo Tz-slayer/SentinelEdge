@@ -3,6 +3,7 @@ cameras:
     name: "Demo Camera"
     type: "mock"
     uri: "mock://demo"
+    buffer_mode: "copy"
     enabled: true
     width: 1280
     height: 720
@@ -11,6 +12,7 @@ cameras:
     name: "USB Camera"
     type: "v4l2"
     uri: "/dev/video0"
+    buffer_mode: "copy"
     enabled: false
     width: 640
     height: 480

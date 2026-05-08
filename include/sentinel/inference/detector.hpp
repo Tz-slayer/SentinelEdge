@@ -38,11 +38,11 @@ public:
     virtual void close() noexcept = 0;
 
     /**
-     * @brief 对单帧数据执行目标检测。
-     * @param frame 待检测的视频帧。
+     * @brief 对模型输入张量执行目标检测。
+     * @param tensor 已完成预处理的模型输入张量。
      * @return 当前帧的检测结果列表；失败时返回空列表并更新 `last_error()`。
      */
-    virtual std::vector<Detection> detect(const Frame& frame) = 0;
+    virtual std::vector<Detection> detect(const TensorBuffer& tensor) = 0;
 
     /**
      * @brief 返回检测器后端类型标识。

@@ -15,7 +15,9 @@ namespace sentinel {
  * @brief 从本地 V4L2 摄像头设备采集视频帧。
  *
  * 该实现使用 Linux V4L2 流式采集接口，核心流程包括 `mmap`、
- * `poll`、`VIDIOC_DQBUF` 和 `VIDIOC_QBUF`。
+ * `poll`、`VIDIOC_DQBUF` 和 `VIDIOC_QBUF`。当前稳定实现支持
+ * `buffer_mode: "copy"`；`loaned` 零拷贝模式需要后续 FrameView
+ * 生命周期改造完成后再启用。
  */
 class CameraVideoSource final : public VideoSource {
 public:

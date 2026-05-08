@@ -63,6 +63,16 @@ bool CameraVideoSource::open()
 {
     close();
 
+    if (config_.buffer_mode == "loaned") {
+        last_error_ = "V4L2 loaned buffer mode requires FrameView/FrameLease support; "
+                      "current pipeline supports copy mode only";
+        return false;
+    }
+    if (config_.buffer_mode != "copy") {
+        last_error_ = "unsupported V4L2 buffer mode: " + config_.buffer_mode;
+        return false;
+    }
+
     // 设备使用非阻塞方式打开，后续由 poll 控制等待时机。
     fd_ = ::open(config_.uri.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
     if (fd_ == -1) {

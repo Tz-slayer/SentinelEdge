@@ -2,10 +2,13 @@
 
 #include "sentinel/analytics/event_builder.hpp"
 #include "sentinel/inference/detector_factory.hpp"
+#include "sentinel/preprocess/preprocessor_factory.hpp"
 #include "sentinel/video/video_source_factory.hpp"
 
+#include <memory>
 #include <string>
 #include <stdexcept>
+#include <utility>
 
 namespace sentinel {
 namespace {
@@ -24,6 +27,29 @@ CameraConfig first_enabled_camera(const std::vector<CameraConfig>& cameras)
     }
 
     throw std::runtime_error("no enabled camera configured");
+}
+
+/**
+ * @brief 判断当前推理后端是否需要真实图像预处理。
+ * @param inference 推理后端配置。
+ * @return mock 后端返回 `false`，真实推理后端返回 `true`。
+ */
+bool needs_frame_preprocessor(const InferenceConfig& inference)
+{
+    return inference.backend != "mock";
+}
+
+/**
+ * @brief 为 mock 推理构造只携带元数据的张量。
+ * @param frame 视频源输出的原始帧。
+ * @return 用于驱动 mock 检测器的轻量张量对象。
+ */
+TensorBuffer make_metadata_tensor(const Frame& frame)
+{
+    TensorBuffer tensor;
+    tensor.frame_sequence = frame.sequence;
+    tensor.camera_id = frame.camera_id;
+    return tensor;
 }
 
 /**
@@ -80,7 +106,8 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
 {
     const auto camera = first_enabled_camera(config.cameras);
     auto video_source = create_video_source(camera);
-    logger.info("open video source camera=" + camera.id + " type=" + camera.type + " uri=" + camera.uri);
+    logger.info("open video source camera=" + camera.id + " type=" + camera.type +
+                " uri=" + camera.uri + " buffer_mode=" + camera.buffer_mode);
     return run_demo_pipeline(config, *video_source, logger, stop_requested);
 }
 
@@ -119,11 +146,30 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
         throw std::runtime_error(error_message);
     }
 
+    std::unique_ptr<FramePreprocessor> preprocessor;
+    if (needs_frame_preprocessor(config.inference)) {
+        preprocessor = create_frame_preprocessor(config.preprocess);
+        logger.info("open frame preprocessor backend=" + std::string(preprocessor->kind()) +
+                    " layout=" + config.preprocess.output_layout +
+                    " dtype=" + config.preprocess.output_dtype);
+        if (!preprocessor->open()) {
+            const auto error_message = "unable to open " + std::string(preprocessor->kind()) +
+                                       " preprocessor: " +
+                                       std::string(preprocessor->last_error());
+            logger.error(error_message);
+            video_source.close();
+            throw std::runtime_error(error_message);
+        }
+    }
+
     auto detector = create_detector(config.inference, config.rules);
     if (!detector->open()) {
         const auto error_message = "unable to open " + std::string(detector->kind()) +
                                    " detector: " + std::string(detector->last_error());
         logger.error(error_message);
+        if (preprocessor) {
+            preprocessor->close();
+        }
         video_source.close();
         throw std::runtime_error(error_message);
     }
@@ -150,7 +196,21 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
             break;
         }
 
-        const auto detections = detector->detect(*frame);
+        TensorBuffer tensor;
+        if (preprocessor) {
+            // 真实推理路径先将摄像头帧转换成模型输入张量，再交给检测器。
+            auto processed = preprocessor->process(*frame);
+            if (!processed.has_value()) {
+                logger.error("frame preprocessor failed: " +
+                             std::string(preprocessor->last_error()));
+                break;
+            }
+            tensor = std::move(*processed);
+        } else {
+            tensor = make_metadata_tensor(*frame);
+        }
+
+        const auto detections = detector->detect(tensor);
         if (!detector->last_error().empty()) {
             logger.error("detector failed: " + std::string(detector->last_error()));
             break;
@@ -163,6 +223,9 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
     }
 
     detector->close();
+    if (preprocessor) {
+        preprocessor->close();
+    }
     video_source.close();
     logger.info("pipeline finished frames=" + std::to_string(result.frames_processed) +
                 " detections=" + std::to_string(result.detections_seen) +

@@ -36,13 +36,32 @@ struct InferenceConfig {
 };
 
 /**
+ * @brief 图像预处理策略运行配置。
+ *
+ * 该配置描述从视频帧到模型输入张量的转换方式。当前生产链路优先使用
+ * OpenCV 实现软解码和缩放，后续可切换为 DVPP 以对比硬件预处理性能。
+ */
+struct PreprocessConfig {
+    std::string backend{"opencv"};
+    int output_width{640};
+    int output_height{640};
+    std::string output_layout{"NCHW"};
+    std::string output_dtype{"FP32"};
+    bool normalize{true};
+};
+
+/**
  * @brief 单路摄像头或视频流输入配置。
+ *
+ * `buffer_mode` 用于控制视频帧缓冲区的数据通路：`copy` 表示 V4L2
+ * 出队后复制到 `Frame::data`，`loaned` 预留给后续零拷贝租借缓冲区模式。
  */
 struct CameraConfig {
     std::string id{"demo-camera"};
     std::string name{"Demo Camera"};
     std::string type{"mock"};
     std::string uri{"mock://demo"};
+    std::string buffer_mode{"copy"};
     bool enabled{true};
     int width{1280};
     int height{720};
@@ -66,6 +85,7 @@ struct SentinelConfig {
     ServiceConfig service;
     LoggingConfig logging;
     InferenceConfig inference;
+    PreprocessConfig preprocess;
     std::vector<CameraConfig> cameras;
     RuleConfig rules;
 };
@@ -92,6 +112,22 @@ struct Frame {
     std::int64_t timestamp_ns{0};
     std::size_t bytes_used{0};
     std::vector<std::uint8_t> data;
+};
+
+/**
+ * @brief 模型输入张量及其来源帧元数据。
+ *
+ * `data` 按 `dtype` 和 `layout` 描述的格式存放原始字节。对于 AscendCL
+ * 推理后端，该字节流会直接拷贝到 Device 输入缓冲区，因此预处理策略必须
+ * 保证尺寸、布局和数据类型与 `.om` 模型输入一致。
+ */
+struct TensorBuffer {
+    std::vector<std::uint8_t> data;
+    std::vector<int> shape;
+    std::string layout;
+    std::string dtype;
+    int frame_sequence{0};
+    std::string camera_id;
 };
 
 /**

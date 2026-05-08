@@ -43,5 +43,13 @@ int main()
     expect(!source.read_frame().has_value(), "closed source should not return frames");
 
     source.close();
+
+    config.buffer_mode = "loaned";
+    sentinel::CameraVideoSource loaned_source(config);
+    expect(!loaned_source.open(), "loaned buffer mode should fail until FrameView support lands");
+    expect(loaned_source.last_error().find("FrameView") != std::string_view::npos,
+           "loaned buffer mode should explain the missing FrameView contract");
+
+    loaned_source.close();
     return 0;
 }

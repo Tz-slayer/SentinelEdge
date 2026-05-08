@@ -167,27 +167,27 @@ public:
 
     /**
      * @brief 执行一次同步推理。
-     * @param frame 待推理的视频帧。
+     * @param tensor 预处理后的模型输入张量。
      * @return 当前阶段暂不解析 YOLO 输出，成功推理后返回空列表。
      */
-    std::vector<Detection> detect(const Frame& frame)
+    std::vector<Detection> detect(const TensorBuffer& tensor)
     {
         if (input_buffers_.size() != 1U) {
             last_error_ = "AscendCL detector currently supports exactly one model input";
             return {};
         }
 
-        if (frame.data.size() != input_buffers_.front().size) {
-            last_error_ = "frame input bytes mismatch: expected " +
+        if (tensor.data.size() != input_buffers_.front().size) {
+            last_error_ = "tensor input bytes mismatch: expected " +
                           std::to_string(input_buffers_.front().size) + ", got " +
-                          std::to_string(frame.data.size());
+                          std::to_string(tensor.data.size());
             return {};
         }
 
         auto ret = aclrtMemcpy(input_buffers_.front().data,
                                input_buffers_.front().size,
-                               frame.data.data(),
-                               frame.data.size(),
+                               tensor.data.data(),
+                               tensor.data.size(),
                                ACL_MEMCPY_HOST_TO_DEVICE);
         if (!acl_ok(ret)) {
             set_error("aclrtMemcpy(input)", ret);
@@ -393,12 +393,12 @@ void AscendClDetector::close() noexcept
 
 /**
  * @brief 执行一次 AscendCL 推理。
- * @param frame 待推理的视频帧。
+ * @param tensor 预处理后的模型输入张量。
  * @return 当前阶段暂不解析 YOLO 输出，成功推理后返回空列表。
  */
-std::vector<Detection> AscendClDetector::detect(const Frame& frame)
+std::vector<Detection> AscendClDetector::detect(const TensorBuffer& tensor)
 {
-    return impl_->detect(frame);
+    return impl_->detect(tensor);
 }
 
 /**

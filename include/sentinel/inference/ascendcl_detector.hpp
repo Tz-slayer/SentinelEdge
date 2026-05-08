@@ -41,11 +41,11 @@ public:
     void close() noexcept override;
 
     /**
-     * @brief 使用当前帧数据执行一次 AscendCL 同步推理。
-     * @param frame 待推理的视频帧，当前要求 `frame.data` 已经是模型输入张量字节流。
+     * @brief 使用当前张量数据执行一次 AscendCL 同步推理。
+     * @param tensor 待推理的模型输入张量，字节流必须与 `.om` 输入大小一致。
      * @return 当前阶段暂不做 YOLO 后处理，成功推理后返回空检测列表。
      */
-    std::vector<Detection> detect(const Frame& frame) override;
+    std::vector<Detection> detect(const TensorBuffer& tensor) override;
 
     /**
      * @brief 返回检测器后端类型。

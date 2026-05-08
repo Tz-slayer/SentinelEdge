@@ -192,6 +192,18 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             config.inference.model_path = value;
         } else if (section == "inference" && key == "device_id") {
             config.inference.device_id = std::stoi(value);
+        } else if (section == "preprocess" && key == "backend") {
+            config.preprocess.backend = value;
+        } else if (section == "preprocess" && key == "output_width") {
+            config.preprocess.output_width = std::stoi(value);
+        } else if (section == "preprocess" && key == "output_height") {
+            config.preprocess.output_height = std::stoi(value);
+        } else if (section == "preprocess" && key == "output_layout") {
+            config.preprocess.output_layout = value;
+        } else if (section == "preprocess" && key == "output_dtype") {
+            config.preprocess.output_dtype = value;
+        } else if (section == "preprocess" && key == "normalize") {
+            config.preprocess.normalize = parse_bool(value);
         } else if (section == "runtime" && key == "data_dir") {
             config.service.data_dir = value;
         } else if (section == "pipeline" && key == "max_frames") {
@@ -216,6 +228,8 @@ void apply_camera_value(CameraConfig& camera, const std::string& key, const std:
         camera.type = value;
     } else if (key == "uri") {
         camera.uri = value;
+    } else if (key == "buffer_mode") {
+        camera.buffer_mode = value;
     } else if (key == "enabled") {
         camera.enabled = parse_bool(value);
     } else if (key == "width") {
@@ -328,6 +342,13 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     if (config.cameras.empty()) {
         throw std::runtime_error("at least one camera must be configured");
     }
+    for (const auto& camera : config.cameras) {
+        // buffer_mode 是运行期性能实验开关，只允许明确的已知取值。
+        if (camera.buffer_mode != "copy" && camera.buffer_mode != "loaned") {
+            throw std::runtime_error("camera.buffer_mode must be either copy or loaned: " +
+                                     camera.id);
+        }
+    }
     if (config.service.max_frames <= 0) {
         throw std::runtime_error("pipeline.max_frames must be greater than zero");
     }
@@ -345,6 +366,18 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     }
     if (config.inference.device_id < 0) {
         throw std::runtime_error("inference.device_id must not be negative");
+    }
+    if (config.preprocess.backend.empty()) {
+        throw std::runtime_error("preprocess.backend must not be empty");
+    }
+    if (config.preprocess.output_width <= 0 || config.preprocess.output_height <= 0) {
+        throw std::runtime_error("preprocess output size must be positive");
+    }
+    if (config.preprocess.output_layout != "NCHW") {
+        throw std::runtime_error("preprocess.output_layout currently supports only NCHW");
+    }
+    if (config.preprocess.output_dtype != "FP32") {
+        throw std::runtime_error("preprocess.output_dtype currently supports only FP32");
     }
     if (config.rules.hold_frames <= 0) {
         throw std::runtime_error("events.hold_frames must be greater than zero");

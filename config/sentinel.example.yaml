@@ -2,6 +2,24 @@ service:
   host: "0.0.0.0"
   port: 8080
 
+logging:
+  backend: "stderr"
+  level: "info"
+  ident: "video_sentinel"
+
+inference:
+  backend: "ascendcl"
+  model_path: "models/yolo/yolo26n.om"
+  device_id: 0
+
+preprocess:
+  backend: "opencv"
+  output_width: 640
+  output_height: 640
+  output_layout: "NCHW"
+  output_dtype: "FP32"
+  normalize: true
+
 runtime:
   data_dir: "./data"
 

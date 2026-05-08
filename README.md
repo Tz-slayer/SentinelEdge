@@ -22,12 +22,15 @@
 - `data/`：本地运行数据目录
 
 当前 C++ 程序已经接入 V4L2 摄像头、AscendCL 推理后端骨架、日志策略和部署包生成流程。mock 输入只保留给本机单元测试夹具，开发板调试配置不再使用 mock。
+图像预处理已经抽象为策略接口，当前可选 `opencv` 和 `dvpp`，其中 `opencv` 已实现软解码、缩放和 NCHW FP32 张量打包，`dvpp` 仍是待实现占位策略。
+摄像头配置已经预留运行期缓冲区模式开关：`buffer_mode: "copy"` 表示稳定的复制模式，`buffer_mode: "loaned"` 预留给后续 V4L2 零拷贝租借缓冲区模式。
 
 ## 构建要求
 
 - CMake 3.16+
 - 若使用 `CMakePresets.json`，建议 CMake 3.21+
 - 支持 C++17 的编译器
+- 使用 `preprocess.backend: "opencv"` 时，需要安装 OpenCV 开发库，至少包含 `core`、`imgproc`、`imgcodecs` 组件
 
 ## 构建与测试
 
@@ -63,6 +66,8 @@ ctest --test-dir build --output-on-failure
   是否启用 AddressSanitizer 和 UndefinedBehaviorSanitizer
 - `ENABLE_ASCENDCL`
   是否编译 AscendCL 推理后端；开发机可以关闭，部署到 Orange Pi AI Pro 时启用
+- `ENABLE_OPENCV_PREPROCESSOR`
+  是否编译 OpenCV 图像预处理后端；使用当前 `config/dev` 和 `config/prod` 时应保持开启
 
 ### 推荐使用方式
 
@@ -127,6 +132,19 @@ cmake --preset board-native-debug \
   -DASCENDCL_LIB_DIR=/your/actual/lib/dir
 ```
 
+摄像头缓冲区模式在 `config/*/cameras.yaml` 中配置：
+
+```yaml
+cameras:
+  - id: "usb-camera-0"
+    type: "v4l2"
+    uri: "/dev/video0"
+    buffer_mode: "copy"    # copy / loaned
+```
+
+当前可运行路径是 `copy`。`loaned` 会被配置系统识别，但 V4L2 源会拒绝启动并提示需要
+`FrameView/FrameLease` 生命周期支持；这是后续实现真正零拷贝对比实验的入口。
+
 本机交叉编译部署构建：
 
 ```bash
@@ -136,6 +154,7 @@ cmake --build --preset prod
 
 `prod` preset 会在本机使用 `cmake/toolchains/aarch64-linux-gnu.cmake`
 和 `aarch64-linux-gnu-g++` 生成 aarch64 可执行文件。开发板只需要接收构建产物并运行。
+由于当前生产配置使用 OpenCV 预处理，交叉编译 `prod` 时还需要能被交叉工具链找到的 aarch64 OpenCV 开发库；如果没有目标架构 OpenCV sysroot，建议直接在开发板上使用 `board-native-debug` 先调试链路。
 
 如果你的工具链前缀不同，可以显式覆盖：
 
@@ -257,6 +276,7 @@ docker compose config
 - 生产构建不会编译 `sentinel_tests`
 - 若运行时仍然使用 `type: "mock"` 的摄像头配置，工厂会拒绝创建该视频源
 - 本机构建时必须能访问 `ASCENDCL_ROOT/include/acl/acl.h` 和 `ASCENDCL_LIB_DIR/libascendcl.so`
+- 当前配置使用 OpenCV 预处理，本机交叉编译时还必须提供目标架构的 OpenCV 库
 - 当前默认 `ASCENDCL_ROOT` 是 `third_party/ascend-cann/8.0.0`
 - 当前默认 `ASCENDCL_LIB_DIR` 是 `third_party/ascend-cann/8.0.0/devlib/linux/aarch64`
 - 开发板运行时也必须能找到 AscendCL 运行时依赖，可以通过系统安装路径或 `LD_LIBRARY_PATH` 指向板端库目录

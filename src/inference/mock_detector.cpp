@@ -31,11 +31,11 @@ void MockDetector::close() noexcept
 }
 
 /**
- * @brief 为一帧数据生成稳定的模拟检测结果。
- * @param frame 当前帧元数据。
+ * @brief 为一个输入张量生成稳定的模拟检测结果。
+ * @param tensor 当前张量携带的来源帧元数据。
  * @return 模拟检测结果列表。
  */
-std::vector<Detection> MockDetector::detect(const Frame& frame)
+std::vector<Detection> MockDetector::detect(const TensorBuffer& tensor)
 {
     std::vector<Detection> detections;
 
@@ -45,19 +45,19 @@ std::vector<Detection> MockDetector::detect(const Frame& frame)
             "person",
             0.91,
             Rect{0.22, 0.18, 0.20, 0.46},
-            frame.sequence,
-            frame.camera_id,
+            tensor.frame_sequence,
+            tensor.camera_id,
         });
     }
 
     // 车辆目标按固定节奏出现，用于模拟间歇性检测结果。
-    if (frame.sequence % 3 == 0 && is_target_class("vehicle")) {
+    if (tensor.frame_sequence % 3 == 0 && is_target_class("vehicle")) {
         detections.push_back(Detection{
             "vehicle",
             0.86,
             Rect{0.52, 0.42, 0.34, 0.28},
-            frame.sequence,
-            frame.camera_id,
+            tensor.frame_sequence,
+            tensor.camera_id,
         });
     }
 

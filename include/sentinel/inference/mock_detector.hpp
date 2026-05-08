@@ -32,11 +32,11 @@ public:
     void close() noexcept override;
 
     /**
-     * @brief 为一帧数据生成模拟检测结果。
-     * @param frame 用于派生固定检测结果的帧元数据。
+     * @brief 为一个输入张量生成模拟检测结果。
+     * @param tensor 用于派生固定检测结果的来源帧元数据。
      * @return 当前帧的模拟检测结果列表。
      */
-    std::vector<Detection> detect(const Frame& frame) override;
+    std::vector<Detection> detect(const TensorBuffer& tensor) override;
 
     /**
      * @brief 返回检测器类型标识。
