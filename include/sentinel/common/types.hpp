@@ -38,27 +38,28 @@ struct InferenceConfig {
 /**
  * @brief 图像预处理策略运行配置。
  *
- * 该配置描述从视频帧到模型输入张量的转换方式。OpenCV 路径输出
- * `NCHW`/`FP32`；DVPP + 静态 AIPP 模型路径输出 `NV12`/`UINT8`。
+ * 该配置描述从视频帧到模型输入张量的转换方式。当前主线固定为
+ * DVPP JPEGD/VPC 输出 `NV12`/`UINT8`，由静态 AIPP OM 在 AI Core 内完成
+ * 色域转换和归一化。
  */
 struct PreprocessConfig {
-    std::string backend{"opencv"};
+    std::string backend{"dvpp"};
     int device_id{0};
     int output_width{640};
     int output_height{640};
-    std::string output_layout{"NCHW"};
-    std::string output_dtype{"FP32"};
-    bool normalize{true};
+    std::string output_layout{"NV12"};
+    std::string output_dtype{"UINT8"};
+    bool normalize{false};
 };
 
 /**
  * @brief 目标检测后处理策略运行配置。
  *
- * 该配置描述如何把模型原始输出张量解析为 `Detection`。OpenCV 后端
- * 负责 CPU 侧 YOLO 解码与 NMS，DVPP 后端预留给后续硬件相关实验入口。
+ * 该配置描述如何把模型原始输出张量解析为 `Detection`。当前主线使用
+ * `dvpp` 配置入口承载 YOLO 解码与纯 C++ NMS；DVPP 本身不执行 NMS。
  */
 struct PostprocessConfig {
-    std::string backend{"opencv"};
+    std::string backend{"dvpp"};
     std::string model_type{"yolo"};
     std::string output_layout{"channels_first"};
     int num_classes{80};
@@ -74,7 +75,7 @@ struct PostprocessConfig {
  */
 struct OverlayConfig {
     bool enabled{false};
-    std::string backend{"opencv"};
+    std::string backend{"dvpp"};
 };
 
 /**
@@ -99,7 +100,7 @@ struct OutputConfig {
  * @brief 性能统计配置。
  *
  * 该配置控制 pipeline 是否输出阶段耗时。`csv_path` 为空时只输出聚合日志；
- * 非空时逐帧写入 CSV，便于开发板上做 `none/debug_image/mjpeg` 等对照实验。
+ * 非空时逐帧写入 CSV，便于开发板上观察主线链路的采集、预处理、推理和输出耗时。
  */
 struct PerformanceConfig {
     bool enabled{true};
@@ -110,28 +111,26 @@ struct PerformanceConfig {
 /**
  * @brief 流水线级运行配置。
  *
- * `backend` 是用户可见的图像处理后端选择。配置加载阶段会把它映射到
- * 预处理、后处理和画框策略：`opencv` 表示全链路使用 CPU/OpenCV 路径，
- * `dvpp` 表示在 DVPP 能加速的图像处理环节优先使用 DVPP，非图像硬件能力
- * 仍由 CPU 侧代码完成。
+ * `backend` 保留为配置字段用于启动校验和日志可读性。当前主线只接受
+ * `dvpp`，并在配置加载阶段映射到预处理、后处理和画框策略。
  */
 struct PipelineConfig {
-    std::string backend{"opencv"};
+    std::string backend{"dvpp"};
     int max_frames{5};
 };
 
 /**
  * @brief 单路摄像头或视频流输入配置。
  *
- * `buffer_mode` 用于控制视频帧缓冲区的数据通路：`copy` 表示 V4L2
- * 出队后复制到 `Frame::data`，`loaned` 预留给后续零拷贝租借缓冲区模式。
+ * `buffer_mode` 当前固定为 `loaned`，表示 V4L2 `mmap` 缓冲区由 `Frame`
+ * 租借持有，最后一个租约释放时再通过 `VIDIOC_QBUF` 归还驱动。
  */
 struct CameraConfig {
     std::string id{"demo-camera"};
     std::string name{"Demo Camera"};
     std::string type{"mock"};
     std::string uri{"mock://demo"};
-    std::string buffer_mode{"copy"};
+    std::string buffer_mode{"loaned"};
     bool enabled{true};
     int width{1280};
     int height{720};
@@ -220,7 +219,7 @@ struct Frame {
 
     /**
      * @brief 返回当前帧载荷的只读起始地址。
-     * @return `loaned` 模式返回驱动缓冲区地址，`copy` 模式返回 `data.data()`。
+     * @return `loaned` 模式返回驱动缓冲区地址；测试或 mock 帧返回 `data.data()`。
      */
     const std::uint8_t* payload_data() const noexcept
     {
@@ -229,7 +228,7 @@ struct Frame {
 
     /**
      * @brief 返回当前帧载荷的有效字节数。
-     * @return `loaned` 模式返回租借缓冲区有效长度，`copy` 模式返回 `data` 长度。
+     * @return `loaned` 模式返回租借缓冲区有效长度；测试或 mock 帧返回 `data` 长度。
      */
     std::size_t payload_size() const noexcept
     {
@@ -249,9 +248,8 @@ struct Frame {
 /**
  * @brief 解码或渲染后的图像缓冲区。
  *
- * 该结构用于统一 OpenCV、DVPP 等图像处理后端的中间结果。当前稳定
- * 路径使用 Host 内存和 BGR24/RGB24 等普通像素格式；后续接入硬件
- * 加速或零拷贝时，可在不改变上层阶段语义的前提下扩展内存类型。
+ * 该结构用于调试输出链路中的解码和画框结果。主线推理输入优先保持在
+ * Ascend Device 内存中；只有 `debug_image` 或 `mjpeg` 预览需要 Host BGR24。
  */
 struct ImageBuffer {
     int width{0};

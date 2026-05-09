@@ -18,9 +18,9 @@ class V4l2BufferLease;
  * @brief 从本地 V4L2 摄像头设备采集视频帧。
  *
  * 该实现使用 Linux V4L2 流式采集接口，核心流程包括 `mmap`、
- * `poll`、`VIDIOC_DQBUF` 和 `VIDIOC_QBUF`。`buffer_mode: "copy"`
- * 会复制驱动缓冲区；`buffer_mode: "loaned"` 会把 V4L2 `mmap`
- * 缓冲区租借给 `Frame`，最后一个 `Frame` 释放时再归还给驱动。
+ * `poll`、`VIDIOC_DQBUF` 和 `VIDIOC_QBUF`。当前主线固定使用
+ * `buffer_mode: "loaned"`，即把 V4L2 `mmap` 缓冲区租借给 `Frame`，
+ * 最后一个 `Frame` 释放时再归还给驱动，避免采集阶段额外复制。
  */
 class CameraVideoSource final : public VideoSource {
 public:

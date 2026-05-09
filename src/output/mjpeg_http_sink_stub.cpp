@@ -5,7 +5,7 @@
 namespace sentinel {
 
 /**
- * @brief 构造未启用 OpenCV 时的 MJPEG 输出占位对象。
+ * @brief 构造未启用调试视频输出时的 MJPEG 输出占位对象。
  * @param output 输出通道配置。
  * @param overlay 画框叠加配置。
  */
@@ -16,12 +16,12 @@ MjpegHttpSink::MjpegHttpSink(OutputConfig output, OverlayConfig overlay)
 }
 
 /**
- * @brief 报告当前二进制未启用 MJPEG 输出所需的 OpenCV 图像能力。
+ * @brief 报告当前二进制未启用 MJPEG 输出能力。
  * @return 固定返回 `false`。
  */
 bool MjpegHttpSink::open()
 {
-    last_error_ = "mjpeg sink requires OpenCV image backend at build time";
+    last_error_ = "mjpeg sink requires ENABLE_DEBUG_VIDEO_SINKS=ON at build time";
     return false;
 }
 
@@ -43,7 +43,7 @@ bool MjpegHttpSink::write(const Frame& frame, const std::vector<Detection>& dete
 {
     static_cast<void>(frame);
     static_cast<void>(detections);
-    last_error_ = "mjpeg sink requires OpenCV image backend at build time";
+    last_error_ = "mjpeg sink requires ENABLE_DEBUG_VIDEO_SINKS=ON at build time";
     return false;
 }
 

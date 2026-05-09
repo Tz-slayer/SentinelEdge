@@ -5,7 +5,7 @@
 namespace sentinel {
 
 /**
- * @brief 构造未启用 OpenCV 时的调试图输出占位对象。
+ * @brief 构造未启用调试视频输出时的调试图占位对象。
  * @param output 输出通道配置。
  * @param overlay 画框叠加配置。
  * @param data_dir 运行数据根目录。
@@ -20,12 +20,12 @@ DebugImageSink::DebugImageSink(OutputConfig output,
 }
 
 /**
- * @brief 报告当前二进制未启用 OpenCV 调试图输出。
+ * @brief 报告当前二进制未启用调试图输出。
  * @return 固定返回 `false`。
  */
 bool DebugImageSink::open()
 {
-    last_error_ = "debug_image sink requires OpenCV image backend at build time";
+    last_error_ = "debug_image sink requires ENABLE_DEBUG_VIDEO_SINKS=ON at build time";
     return false;
 }
 
@@ -47,7 +47,7 @@ bool DebugImageSink::write(const Frame& frame, const std::vector<Detection>& det
 {
     static_cast<void>(frame);
     static_cast<void>(detections);
-    last_error_ = "debug_image sink requires OpenCV image backend at build time";
+    last_error_ = "debug_image sink requires ENABLE_DEBUG_VIDEO_SINKS=ON at build time";
     return false;
 }
 

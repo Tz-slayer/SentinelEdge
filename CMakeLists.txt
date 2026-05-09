@@ -25,8 +25,7 @@ option(ENABLE_DEV_LOGGING "Enable development-oriented runtime logging" ON)
 option(ENABLE_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
 option(ENABLE_ASCENDCL "Build AscendCL inference backend" OFF)
 option(ENABLE_DVPP "Build Ascend DVPP image preprocessing backend" OFF)
-option(ENABLE_OPENCV_PREPROCESSOR "Build OpenCV frame preprocessing backend" ON)
-option(ENABLE_OPENCV_POSTPROCESSOR "Build OpenCV YOLO postprocessing backend" ON)
+option(ENABLE_DEBUG_VIDEO_SINKS "Build JPEG debug image and MJPEG preview sinks" ON)
 option(INSTALL_DEBUG_SOURCE "Install a compact source snapshot for board-side GDB debugging" OFF)
 
 set(SENTINEL_DEFAULT_CONFIG_DIR "config/prod" CACHE STRING "Default runtime config directory")
@@ -84,11 +83,8 @@ if(ENABLE_ASCENDCL)
 endif()
 
 set(SENTINEL_OPENCV_COMPONENTS)
-if(ENABLE_OPENCV_PREPROCESSOR)
-    list(APPEND SENTINEL_OPENCV_COMPONENTS core imgproc imgcodecs)
-endif()
-if(ENABLE_OPENCV_POSTPROCESSOR)
-    list(APPEND SENTINEL_OPENCV_COMPONENTS core dnn)
+if(ENABLE_DEBUG_VIDEO_SINKS)
+    list(APPEND SENTINEL_OPENCV_COMPONENTS core imgcodecs)
 endif()
 if(SENTINEL_OPENCV_COMPONENTS)
     list(REMOVE_DUPLICATES SENTINEL_OPENCV_COMPONENTS)
@@ -112,8 +108,7 @@ target_compile_definitions(sentinel_project_options
         SENTINEL_ENABLE_MOCK_SOURCES=$<IF:$<BOOL:${ENABLE_MOCK_SOURCES}>,1,0>
         SENTINEL_ENABLE_ASCENDCL=$<IF:$<BOOL:${ENABLE_ASCENDCL}>,1,0>
         SENTINEL_ENABLE_DVPP=$<IF:$<BOOL:${ENABLE_DVPP}>,1,0>
-        SENTINEL_ENABLE_OPENCV_PREPROCESSOR=$<IF:$<BOOL:${ENABLE_OPENCV_PREPROCESSOR}>,1,0>
-        SENTINEL_ENABLE_OPENCV_POSTPROCESSOR=$<IF:$<BOOL:${ENABLE_OPENCV_POSTPROCESSOR}>,1,0>
+        SENTINEL_ENABLE_DEBUG_VIDEO_SINKS=$<IF:$<BOOL:${ENABLE_DEBUG_VIDEO_SINKS}>,1,0>
 )
 
 if(ENABLE_DVPP)
@@ -185,29 +180,15 @@ else()
     )
 endif()
 
-if(ENABLE_OPENCV_PREPROCESSOR)
+if(ENABLE_DEBUG_VIDEO_SINKS)
     list(APPEND SENTINEL_CORE_SOURCES
-        src/image/opencv_image_backend.cpp
         src/output/debug_image_sink.cpp
         src/output/mjpeg_http_sink.cpp
-        src/preprocess/opencv_frame_preprocessor.cpp
     )
 else()
     list(APPEND SENTINEL_CORE_SOURCES
-        src/image/opencv_image_backend_stub.cpp
         src/output/debug_image_sink_stub.cpp
         src/output/mjpeg_http_sink_stub.cpp
-        src/preprocess/opencv_frame_preprocessor_stub.cpp
-    )
-endif()
-
-if(ENABLE_OPENCV_POSTPROCESSOR)
-    list(APPEND SENTINEL_CORE_SOURCES
-        src/postprocess/opencv_yolo_postprocessor.cpp
-    )
-else()
-    list(APPEND SENTINEL_CORE_SOURCES
-        src/postprocess/opencv_yolo_postprocessor_stub.cpp
     )
 endif()
 
@@ -443,65 +424,61 @@ if(ENABLE_TESTS)
         )
     endif()
 
-    if(ENABLE_OPENCV_POSTPROCESSOR)
-        add_executable(sentinel_postprocessor_tests
-            tests/unit/postprocessor_factory_test.cpp
-        )
+    add_executable(sentinel_postprocessor_tests
+        tests/unit/postprocessor_factory_test.cpp
+    )
 
-        target_link_libraries(sentinel_postprocessor_tests
-            PRIVATE
-                sentinel_core
-        )
+    target_link_libraries(sentinel_postprocessor_tests
+        PRIVATE
+            sentinel_core
+    )
 
-        add_test(
-            NAME sentinel.postprocessor_factory
-            COMMAND sentinel_postprocessor_tests
-        )
-    endif()
+    add_test(
+        NAME sentinel.postprocessor_factory
+        COMMAND sentinel_postprocessor_tests
+    )
 
-    if(ENABLE_OPENCV_PREPROCESSOR)
-        add_executable(sentinel_image_backend_tests
-            tests/unit/image_backend_test.cpp
-        )
+    add_executable(sentinel_image_backend_tests
+        tests/unit/image_backend_test.cpp
+    )
 
-        target_link_libraries(sentinel_image_backend_tests
-            PRIVATE
-                sentinel_core
-        )
+    target_link_libraries(sentinel_image_backend_tests
+        PRIVATE
+            sentinel_core
+    )
 
-        add_test(
-            NAME sentinel.image_backend
-            COMMAND sentinel_image_backend_tests
-        )
+    add_test(
+        NAME sentinel.image_backend
+        COMMAND sentinel_image_backend_tests
+    )
 
-        add_executable(sentinel_output_tests
-            tests/unit/output_sink_test.cpp
-        )
+    add_executable(sentinel_output_tests
+        tests/unit/output_sink_test.cpp
+    )
 
-        target_link_libraries(sentinel_output_tests
-            PRIVATE
-                sentinel_core
-        )
+    target_link_libraries(sentinel_output_tests
+        PRIVATE
+            sentinel_core
+    )
 
-        add_test(
-            NAME sentinel.output_sink
-            COMMAND sentinel_output_tests
-        )
+    add_test(
+        NAME sentinel.output_sink
+        COMMAND sentinel_output_tests
+    )
 
-        add_executable(sentinel_preprocessor_tests
-            tests/unit/preprocessor_factory_test.cpp
-        )
+    add_executable(sentinel_preprocessor_tests
+        tests/unit/preprocessor_factory_test.cpp
+    )
 
-        target_link_libraries(sentinel_preprocessor_tests
-            PRIVATE
-                sentinel_core
-        )
+    target_link_libraries(sentinel_preprocessor_tests
+        PRIVATE
+            sentinel_core
+    )
 
-        add_test(
-            NAME sentinel.preprocessor_factory
-            COMMAND sentinel_preprocessor_tests
-        )
-    endif()
+    add_test(
+        NAME sentinel.preprocessor_factory
+        COMMAND sentinel_preprocessor_tests
+    )
 endif()
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
@@ -512,8 +489,7 @@ message(STATUS "ENABLE_DEV_LOGGING=${ENABLE_DEV_LOGGING}")
 message(STATUS "ENABLE_SANITIZERS=${ENABLE_SANITIZERS}")
 message(STATUS "ENABLE_ASCENDCL=${ENABLE_ASCENDCL}")
 message(STATUS "ENABLE_DVPP=${ENABLE_DVPP}")
-message(STATUS "ENABLE_OPENCV_PREPROCESSOR=${ENABLE_OPENCV_PREPROCESSOR}")
-message(STATUS "ENABLE_OPENCV_POSTPROCESSOR=${ENABLE_OPENCV_POSTPROCESSOR}")
+message(STATUS "ENABLE_DEBUG_VIDEO_SINKS=${ENABLE_DEBUG_VIDEO_SINKS}")
 message(STATUS "INSTALL_DEBUG_SOURCE=${INSTALL_DEBUG_SOURCE}")
 message(STATUS "ASCENDCL_ROOT=${ASCENDCL_ROOT}")
 message(STATUS "ASCENDCL_LIB_DIR=${ASCENDCL_LIB_DIR}")

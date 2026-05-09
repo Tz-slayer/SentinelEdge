@@ -1,7 +1,6 @@
 #include "sentinel/preprocess/preprocessor_factory.hpp"
 
 #include "sentinel/preprocess/dvpp_frame_preprocessor.hpp"
-#include "sentinel/preprocess/opencv_frame_preprocessor.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -15,14 +14,11 @@ namespace sentinel {
  */
 std::unique_ptr<FramePreprocessor> create_frame_preprocessor(const PreprocessConfig& config)
 {
-    if (config.backend == "opencv") {
-        return std::make_unique<OpenCvFramePreprocessor>(config);
-    }
     if (config.backend == "dvpp") {
         return std::make_unique<DvppFramePreprocessor>(config);
     }
 
-    throw std::runtime_error("unsupported preprocess backend: " + config.backend);
+    throw std::runtime_error("unsupported preprocess backend, expected dvpp: " + config.backend);
 }
 
 } // namespace sentinel

@@ -21,11 +21,11 @@
 - `models/`：模型放置说明
 - `data/`：本地运行数据目录
 
-当前 C++ 程序已经接入 V4L2 摄像头、AscendCL 推理后端骨架、日志策略和部署包生成流程。mock 输入只保留给本机单元测试夹具，开发板调试配置不再使用 mock。
-图像预处理已经抽象为策略接口，用户通过 `pipeline.backend` 在 `opencv` 和 `dvpp` 之间切换。`opencv` 使用 CPU/OpenCV 完成解码、缩放和 NCHW FP32 张量打包；`dvpp` 面向静态 AIPP 模型时会执行 JPEGD 解码和 VPC 缩放，并把 NV12/YUV420SP UINT8 结果直接写入 AscendCL 模型输入 Device buffer，避免 `DVPP -> Host -> AscendCL input` 往返拷贝。DVPP 预处理器会复用 JPEGD 输出 Device buffer、Host fallback 的 VPC 输出 buffer、PicDesc 和 ResizeConfig，DVPP 图像后端也会复用调试输出链路的 JPEGD buffer 和 PicDesc，减少主循环中的按帧资源申请释放。
+当前 C++ 程序已经接入 V4L2 摄像头、AscendCL 推理后端、日志策略和部署包生成流程。mock 输入只保留给本机单元测试夹具，开发板调试配置不再使用 mock。
+图像预处理主线已经收敛为 `dvpp + 静态 AIPP + 零拷贝`：V4L2 使用 `loaned` 模式租借 `mmap` 缓冲区，DVPP 执行 JPEGD 解码和 VPC 缩放，并把 NV12/YUV420SP UINT8 结果直接写入 AscendCL 模型输入 Device buffer，避免 `DVPP -> Host -> AscendCL input` 往返拷贝。DVPP 预处理器会复用 JPEGD 输出 Device buffer、Host fallback 的 VPC 输出 buffer、PicDesc 和 ResizeConfig，减少主循环中的按帧资源申请释放。
 模型后处理已经抽象为策略接口，当前支持 YOLO FP32 输出解析、置信度过滤和 NMS；`dvpp` 配置路径下的 YOLO NMS 仍是 CPU 侧纯 C++ 实现，不伪装为 DVPP 硬件能力。
-摄像头配置已经支持运行期缓冲区模式开关：`buffer_mode: "copy"` 表示稳定的复制模式，`buffer_mode: "loaned"` 表示 V4L2 `mmap` 缓冲区租借模式，可减少摄像头帧进入 pipeline 时的一次用户态复制。
-图像处理能力已经统一抽象为 `ImageBackend`，当前 `opencv` 后端支持解码、缩放、张量打包和检测框绘制，`debug_image` 输出通道可以在开发板上保存带框 JPEG，用于验证检测结果是否可视化正确。
+摄像头配置固定为 `buffer_mode: "loaned"`，不再维护复制模式。
+图像处理能力已经统一抽象为 `ImageBackend`，当前仅保留 DVPP 图像后端服务 `debug_image` 和 `mjpeg` 调试输出；JPEG 编码仍临时使用 OpenCV 的 `imgcodecs`。
 视频输出已经抽象为 `VideoSink`，当前支持 `none`、`debug_image` 和 `mjpeg`。`mjpeg` 使用 Linux socket 启动本地 HTTP MJPEG 调试预览，浏览器可以直接查看带框画面；后续再接入 MediaMTX 做生产级 RTSP/ WebRTC 网关。
 
 DVPP/零拷贝优化的当前边界已经记录在 [DVPP 预处理链路](docs/dvpp-preprocess.md)：主推理链路已经完成 V4L2 loaned、DVPP buffer/descriptor 复用、VPC 直写模型输入 Device buffer；剩余瓶颈主要来自 Host 侧 MJPEG 输入、模型输出回 Host 后处理，以及调试预览的 Host 画框和编码。
@@ -35,8 +35,9 @@ DVPP/零拷贝优化的当前边界已经记录在 [DVPP 预处理链路](docs/d
 - CMake 3.16+
 - 若使用 `CMakePresets.json`，建议 CMake 3.21+
 - 支持 C++17 的编译器
-- 使用 `pipeline.backend: "opencv"` 或启用 `debug_image` / `mjpeg` 输出时，需要安装 OpenCV 开发库，至少包含 `core`、`imgproc`、`imgcodecs` 组件
-- 使用 `pipeline.backend: "dvpp"` 和静态 AIPP 模型时，`preprocess.output_layout` 应设置为 `NV12`，`preprocess.output_dtype` 应设置为 `UINT8`
+- 开发板运行主链路需要 AscendCL 和 DVPP，对应 CMake 选项为 `ENABLE_ASCENDCL=ON`、`ENABLE_DVPP=ON`
+- 启用 `debug_image` / `mjpeg` 调试输出时，需要安装 OpenCV 开发库，至少包含 `core`、`imgcodecs` 组件
+- 静态 AIPP 模型路径固定要求 `preprocess.output_layout: "NV12"`、`preprocess.output_dtype: "UINT8"`、`preprocess.normalize: false`
 
 ## 构建与测试
 
@@ -73,12 +74,9 @@ ctest --test-dir build --output-on-failure
 - `ENABLE_ASCENDCL`
   是否编译 AscendCL 推理后端；开发机可以关闭，部署到 Orange Pi AI Pro 时启用
 - `ENABLE_DVPP`
-  是否编译 Ascend DVPP 图像链路；需要同时开启 `ENABLE_ASCENDCL`。运行期通过
-  `pipeline.backend: "dvpp"` 启用 DVPP 可加速的图像处理环节
-- `ENABLE_OPENCV_PREPROCESSOR`
-  是否编译 OpenCV 图像预处理后端；使用当前 `config/dev` 和 `config/prod` 时应保持开启
-- `ENABLE_OPENCV_POSTPROCESSOR`
-  是否编译 OpenCV YOLO 后处理后端；使用当前 `config/dev` 和 `config/prod` 时应保持开启
+  是否编译 Ascend DVPP 图像链路；需要同时开启 `ENABLE_ASCENDCL`
+- `ENABLE_DEBUG_VIDEO_SINKS`
+  是否编译 `debug_image` 和 `mjpeg` 调试输出通道；该能力当前依赖 OpenCV JPEG 编码
 
 ### 推荐使用方式
 
@@ -150,20 +148,17 @@ cameras:
   - id: "usb-camera-0"
     type: "v4l2"
     uri: "/dev/video0"
-    buffer_mode: "copy"    # copy / loaned
+    buffer_mode: "loaned"
 ```
 
-`copy` 会在 `VIDIOC_DQBUF` 后把驱动缓冲区复制到 `Frame::data`，随后立即 `VIDIOC_QBUF`
-归还给驱动。`loaned` 不复制帧载荷，而是让 `Frame` 持有 V4L2 buffer 租约，最后一个
-`Frame` 释放时自动 `VIDIOC_QBUF`。`loaned` 优化的是“摄像头帧进入 pipeline”这一段；
-在 `dvpp` + 静态 AIPP 路径下，DVPP VPC 会继续直接写入 AscendCL 模型输入 Device buffer。
-当前仍保留的成本主要是 V4L2 MJPEG 码流位于 Host，以及模型输出需要拷回 Host 做 YOLO 后处理。
+`loaned` 不复制帧载荷，而是让 `Frame` 持有 V4L2 buffer 租约，最后一个 `Frame` 释放时自动 `VIDIOC_QBUF`。
+在 `dvpp` + 静态 AIPP 路径下，DVPP VPC 会继续直接写入 AscendCL 模型输入 Device buffer。当前仍保留的成本主要是 V4L2 MJPEG 码流位于 Host，以及模型输出需要拷回 Host 做 YOLO 后处理。
 
 YOLO 后处理在 `config/*/sentinel.yaml` 中配置：
 
 ```yaml
 pipeline:
-  backend: "dvpp"            # opencv / dvpp
+  backend: "dvpp"
 
 preprocess:
   output_width: 640
@@ -182,7 +177,7 @@ postprocess:
   merge_coco_vehicles: true
 ```
 
-当前 OpenCV 后处理支持 YOLOv8/YOLO11 常见 FP32 输出形态：
+当前后处理支持 YOLOv8/YOLO11 常见 FP32 输出形态：
 
 - `channels_first`：属性维在前，例如 `[1, 84, 8400]`
 - `anchors_first`：候选框维在前，例如 `[1, 8400, 84]`
@@ -194,7 +189,7 @@ postprocess:
 
 ```yaml
 pipeline:
-  backend: "opencv"          # opencv / dvpp
+  backend: "dvpp"
 
 overlay:
   enabled: true
@@ -239,7 +234,7 @@ cmake --build --preset prod
 
 `prod` preset 会在本机使用 `cmake/toolchains/aarch64-linux-gnu.cmake`
 和 `aarch64-linux-gnu-g++` 生成 aarch64 可执行文件。开发板只需要接收构建产物并运行。
-由于当前生产配置使用 OpenCV 预处理，交叉编译 `prod` 时还需要能被交叉工具链找到的 aarch64 OpenCV 开发库；如果没有目标架构 OpenCV sysroot，建议直接在开发板上使用 `board-native-debug` 先调试链路。
+如果启用了 `ENABLE_DEBUG_VIDEO_SINKS`，交叉编译 `prod` 时还需要能被交叉工具链找到的 aarch64 OpenCV `core/imgcodecs` 开发库；如果没有目标架构 OpenCV sysroot，可以关闭该选项，或直接在开发板上使用 `board-native-debug` 先调试链路。
 
 如果你的工具链前缀不同，可以显式覆盖：
 
@@ -361,7 +356,7 @@ docker compose config
 - 生产构建不会编译 `sentinel_tests`
 - 若运行时仍然使用 `type: "mock"` 的摄像头配置，工厂会拒绝创建该视频源
 - 本机构建时必须能访问 `ASCENDCL_ROOT/include/acl/acl.h` 和 `ASCENDCL_LIB_DIR/libascendcl.so`
-- 当前配置使用 OpenCV 预处理，本机交叉编译时还必须提供目标架构的 OpenCV 库
+- 若启用 `ENABLE_DEBUG_VIDEO_SINKS`，本机交叉编译时还必须提供目标架构的 OpenCV `core/imgcodecs` 库
 - 当前默认 `ASCENDCL_ROOT` 是 `third_party/ascend-cann/8.0.0`
 - 当前默认 `ASCENDCL_LIB_DIR` 是 `third_party/ascend-cann/8.0.0/devlib/linux/aarch64`
 - 开发板运行时也必须能找到 AscendCL 运行时依赖，可以通过系统安装路径或 `LD_LIBRARY_PATH` 指向板端库目录
@@ -560,11 +555,11 @@ cmake --build build
 - `inference.device_id`
   AscendCL 设备编号，单设备通常为 `0`
 - `pipeline.backend`
-  图像处理链路后端，当前支持 `opencv` 和 `dvpp`。选择 `opencv` 时默认不开启 DVPP；选择 `dvpp` 时，系统会在 DVPP 能加速的环节优先使用 DVPP
+  图像处理链路后端，当前只支持 `dvpp`
 - `preprocess.output_width` / `preprocess.output_height`
   模型输入图像尺寸，必须与 `.om` 模型输入匹配
 - `preprocess.output_layout` / `preprocess.output_dtype`
-  模型输入张量布局和数据类型。OpenCV 路径使用 `NCHW` / `FP32`；DVPP + 静态 AIPP 路径使用 `NV12` / `UINT8`，并优先走 AscendCL Device buffer 直写路径
+  模型输入张量布局和数据类型。当前固定使用 `NV12` / `UINT8`，并优先走 AscendCL Device buffer 直写路径
 - `overlay.enabled`
   是否在输出图像上绘制检测框
 - `output.video_sink`
@@ -634,9 +629,5 @@ cmake --build build
   临时启用 MJPEG 预览并运行 `video_sentinel`
 - `scripts/run-board-pipeline-perf.sh`
   只运行当前配置中的一条 pipeline，并生成一份性能日志和一份 CSV
-- `scripts/run-board-pipeline-matrix.sh`
-  按 `config/perf/pipeline-matrix.conf` 运行受控矩阵测试；OpenCV/DVPP 会绑定各自模型和 preprocess profile，输出通道固定为 `none`，并自动生成 Markdown 报告
-- `scripts/generate-pipeline-perf-report.py`
-  从 pipeline 性能 CSV 汇总生成 Markdown 报告
 - `scripts/run-board-dvpp-probe.sh`
   在开发板上运行 `sentinel_dvpp_probe`，验证 DVPP runtime 和可选 JPEG 预处理

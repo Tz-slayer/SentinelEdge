@@ -11,8 +11,7 @@ namespace sentinel {
  * @brief DVPP 图像处理后端。
  *
  * 当前实现使用 DVPP 完成 MJPEG 解码，返回 Host BGR24 图像给调试图和
- * MJPEG 输出链路。缩放、张量打包和画框在 Host BGR24 缓冲区上完成，
- * 主要用于让 `pipeline.backend: dvpp` 的图像链路可运行和可对比。
+ * MJPEG 输出链路。主线推理预处理不经过该类；该类只服务可视化调试输出。
  */
 class DvppImageBackend final : public ImageBackend {
 public:
@@ -52,19 +51,6 @@ public:
      * @return 成功返回缩放后的图像。
      */
     std::optional<ImageBuffer> resize(const ImageBuffer& image, int width, int height) override;
-
-    /**
-     * @brief 将 Host BGR24 图像转换为模型输入张量。
-     * @param image 输入图像。
-     * @param config 预处理输出配置。
-     * @param frame_sequence 来源帧序号。
-     * @param camera_id 来源摄像头 ID。
-     * @return 成功返回模型输入张量。
-     */
-    std::optional<TensorBuffer> to_tensor(const ImageBuffer& image,
-                                          const PreprocessConfig& config,
-                                          int frame_sequence,
-                                          const std::string& camera_id) override;
 
     /**
      * @brief 在 Host BGR24 图像上绘制检测框。

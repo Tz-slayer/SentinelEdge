@@ -1,173 +1,39 @@
 # 图像处理后端设计
 
-## 背景
+## 当前结论
 
-项目中有多处需要图像处理能力：
-
-- 摄像头帧解码，例如 MJPEG、YUYV 到可处理的图像。
-- 推理前预处理，例如 resize、颜色转换、归一化和 NCHW FP32 张量打包。
-- 推理后可视化，例如在原图或输出帧上绘制检测框、类别和置信度。
-- 后续 RTSP 输出前的格式转换、缩放和硬件编码前准备。
-
-这些能力都可能存在 OpenCV CPU 实现和 DVPP 硬件实现。如果每个阶段都各自封装
-OpenCV/DVPP，会导致重复代码、策略数量膨胀，也不利于后续对比性能。
-
-## 设计结论
-
-图像能力统一抽象为 `ImageBackend`，但 pipeline 阶段不合并成一个大类。
-
-也就是说：
+经过开发板性能测试，项目主链路已经收敛为：
 
 ```text
-ImageBackend:
-  opencv / dvpp
-
-Pipeline Stage:
-  FramePreprocessor
-  VideoSink
+V4L2 MJPEG loaned buffer
+  -> DVPP JPEGD
+  -> DVPP VPC 输出 NV12/YUV420SP
+  -> 静态 AIPP OM
+  -> AscendCL 推理
+  -> 纯 C++ YOLO 后处理
 ```
 
-`ImageBackend` 负责“图像能力”，例如解码、缩放、张量打包、绘制检测框。
-`FramePreprocessor`、`VideoSink` 等阶段对象负责“业务语义”。
+因此当前代码不再维护 OpenCV 预处理、OpenCV 图像后端、OpenCV YOLO 后处理和 V4L2 copy 模式。`pipeline.backend` 保留为配置字段，但只接受 `dvpp`，用于启动阶段明确校验。
 
-这种设计避免出现一个大而全的 `ImageProcessor`：
+## 接口边界
 
-```cpp
-class ImageProcessor {
-public:
-    decode();
-    preprocess_to_tensor();
-    draw_boxes();
-    convert_for_encoder();
-};
-```
+`FramePreprocessor` 负责把摄像头帧转换为模型输入。当前唯一实现是 `DvppFramePreprocessor`：
 
-上面的类会越来越胖，并且会让 OpenCV/DVPP 实现被迫实现自己不关心的阶段逻辑。
+- 输入：V4L2 MJPEG 帧，推荐来自 `loaned` 缓冲区。
+- 输出：静态 AIPP 模型消费的 `NV12` / `UINT8`。
+- 优先路径：通过 `process_into()` 直接写入 AscendCL detector 暴露的 Device 输入缓冲区。
+- 回退路径：当 detector 未提供 Device 输入时，输出 Host NV12 缓冲区，仅用于诊断和兼容。
 
-## 当前接口
+`DetectionPostprocessor` 负责把模型输出解析为检测框。当前 `DvppYoloPostprocessor` 名称表示它属于 DVPP 主配置链路，但 YOLO decode/NMS 是纯 C++ CPU 逻辑，DVPP 本身不执行 NMS。
 
-当前代码中的核心接口是：
+`ImageBackend` 只服务调试输出链路，负责把原始帧解码为 Host BGR24 并绘制检测框。它不再负责模型输入张量打包，避免调试图像链路反向影响推理主链路。
 
-```text
-include/sentinel/image/image_backend.hpp
-```
+## 调试输出
 
-它提供：
+`debug_image` 和 `mjpeg` 仍然可用于开发板本地调试：
 
-```text
-decode(Frame) -> ImageBuffer
-resize(ImageBuffer, width, height) -> ImageBuffer
-to_tensor(ImageBuffer, PreprocessConfig, frame_sequence, camera_id) -> TensorBuffer
-draw_detections(ImageBuffer, detections) -> ImageBuffer
-```
+- 解码和画框使用 `DvppImageBackend`。
+- JPEG 文件保存和 MJPEG 帧编码暂时使用 OpenCV `imgcodecs`。
+- 这部分属于调试输出能力，不属于主推理链路的 OpenCV 预处理路径。
 
-当前实现：
-
-```text
-OpenCvImageBackend
-  已实现 MJPEG/JPEG、YUYV、RGB24、BGR24 解码
-  已实现 resize
-  已实现 NCHW FP32 张量打包
-  已实现检测框绘制
-
-DvppImageBackend
-  已预留接口
-  当前明确返回未实现
-```
-
-## 与 FramePreprocessor 的关系
-
-`FramePreprocessor` 仍然保留，因为它表达的是 pipeline 阶段：
-
-```text
-Frame -> TensorBuffer
-```
-
-但 OpenCV 预处理实现内部不再直接写 OpenCV 解码和张量打包细节，而是组合
-`OpenCvImageBackend`：
-
-```text
-OpenCvFramePreprocessor
-  -> ImageBackend::decode
-  -> ImageBackend::resize
-  -> ImageBackend::to_tensor
-```
-
-这样后续如果实现 `DvppFramePreprocessor`，可以复用 `DvppImageBackend` 的硬件解码、
-缩放和张量准备能力。
-
-## 与画框的关系
-
-画框不应该直接写死在 RTSP 推流或 Web 模块中。当前通过 `VideoSink` 组合
-`ImageBackend`，让调试图输出和 RTSP 输出都复用同一套解码与画框能力：
-
-```text
-Frame + Detection[]
-  -> ImageBackend::decode
-  -> ImageBackend::draw_detections
-  -> VideoSink
-```
-
-第一版可用 OpenCV 绘制框，后续如果板端 DVPP/OSD 提供硬件绘制能力，则把实现放到
-`DvppImageBackend::draw_detections` 中。
-
-当前已落地：
-
-```text
-output.video_sink: "debug_image"
-  -> DebugImageSink
-  -> ImageBackend::decode
-  -> ImageBackend::draw_detections
-  -> 保存 JPEG 到 runtime.data_dir / output.debug_image_dir
-
-output.video_sink: "mjpeg"
-  -> MjpegHttpSink
-  -> ImageBackend::decode
-  -> ImageBackend::draw_detections
-  -> JPEG 编码
-  -> HTTP multipart MJPEG 输出
-```
-
-开发配置当前默认使用 `mjpeg`，便于浏览器直接验证带框实时预览。需要定位单帧画框问题时，
-可以临时切回 `debug_image` 保存 JPEG。生产配置默认不启用视频输出，后续再接入 MediaMTX。
-
-## 配置建议
-
-用户可见配置只保留流水线级后端选择：
-
-```yaml
-pipeline:
-  backend: "opencv"
-
-overlay:
-  enabled: true
-
-output:
-  video_sink: "mjpeg"            # none / debug_image / mjpeg
-  debug_image_dir: "debug/frames"
-  debug_image_interval: 1
-  mjpeg_host: "0.0.0.0"
-  mjpeg_port: 8081
-  mjpeg_path: "/stream"
-  mjpeg_quality: 80
-  mjpeg_max_clients: 4
-```
-
-配置加载器会把 `pipeline.backend` 映射到内部策略：
-
-```text
-opencv -> OpenCvFramePreprocessor + OpenCV YOLO 后处理 + OpenCvImageBackend
-dvpp   -> DvppFramePreprocessor + 纯 C++ YOLO 后处理 + DvppImageBackend
-```
-
-选择 `dvpp` 不表示所有代码都由 DVPP 硬件执行。YOLO NMS、归一化打包和当前画框仍可能运行在 CPU 侧；DVPP 只负责它能加速的解码、缩放等图像处理环节。
-
-## 后续推进顺序
-
-1. 保持 `OpenCvFramePreprocessor` 通过 `ImageBackend` 跑通 copy 模式。
-2. 使用 `OpenCvImageBackend::draw_detections` 实现 OpenCV 画框。
-3. 使用 `DebugImageSink` 保存带框 JPEG，验证坐标正确性。
-4. 在开发板上用真实摄像头和 `.om` 模型确认调试图、日志和后处理结果一致。
-5. 接入 MJPEG HTTP 调试预览，让浏览器直接查看带框视频。
-6. 后续接入 MediaMTX，提供 RTSP、HLS 或 WebRTC 等正式流媒体能力。
-7. 最后实现 `DvppImageBackend` 的硬件解码、缩放、张量准备或 OSD 能力。
+后续如果要进一步减少 OpenCV 依赖，可以把 JPEG 编码替换为 DVPP JPEGE 或其他轻量编码器。

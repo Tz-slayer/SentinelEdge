@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <memory>
 #include <utility>
@@ -693,61 +692,6 @@ std::optional<ImageBuffer> DvppImageBackend::resize(const ImageBuffer& image, in
 
     last_error_.clear();
     return output;
-}
-
-/**
- * @brief 将 Host BGR24 图像转换为模型输入张量。
- * @param image 输入图像。
- * @param config 预处理输出配置。
- * @param frame_sequence 来源帧序号。
- * @param camera_id 来源摄像头 ID。
- * @return 成功返回模型输入张量。
- */
-std::optional<TensorBuffer> DvppImageBackend::to_tensor(const ImageBuffer& image,
-                                                        const PreprocessConfig& config,
-                                                        int frame_sequence,
-                                                        const std::string& camera_id)
-{
-    if (config.output_layout != "NCHW") {
-        last_error_ = "DVPP image backend currently supports only NCHW tensor layout";
-        return std::nullopt;
-    }
-    if (config.output_dtype != "FP32") {
-        last_error_ = "DVPP image backend currently supports only FP32 tensor dtype";
-        return std::nullopt;
-    }
-
-    std::string error;
-    if (!validate_bgr24_image(image, error)) {
-        last_error_ = error;
-        return std::nullopt;
-    }
-
-    const auto plane_size = static_cast<std::size_t>(image.width) * image.height;
-    std::vector<float> chw(plane_size * 3U);
-    const auto scale = config.normalize ? (1.0F / 255.0F) : 1.0F;
-    for (int y = 0; y < image.height; ++y) {
-        for (int x = 0; x < image.width; ++x) {
-            const auto pixel_index = static_cast<std::size_t>(y) * image.width + x;
-            const auto offset = pixel_index * 3U;
-            // 输入图像为 BGR24，模型张量按 RGB 通道顺序写入。
-            chw[pixel_index] = static_cast<float>(image.data[offset + 2U]) * scale;
-            chw[plane_size + pixel_index] = static_cast<float>(image.data[offset + 1U]) * scale;
-            chw[plane_size * 2U + pixel_index] = static_cast<float>(image.data[offset]) * scale;
-        }
-    }
-
-    TensorBuffer tensor;
-    tensor.data.resize(chw.size() * sizeof(float));
-    std::memcpy(tensor.data.data(), chw.data(), tensor.data.size());
-    tensor.shape = {1, 3, image.height, image.width};
-    tensor.layout = config.output_layout;
-    tensor.dtype = config.output_dtype;
-    tensor.frame_sequence = frame_sequence;
-    tensor.camera_id = camera_id;
-
-    last_error_.clear();
-    return tensor;
 }
 
 /**

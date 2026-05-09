@@ -2,7 +2,7 @@
 
 ## 当前目标
 
-OpenCV 链路已经跑通后，DVPP 第一阶段先实现 `copy` / `loaned` 两种 V4L2 输入模式下的对照链路：
+经过开发板性能测试，当前主线已经收敛为 DVPP + 静态 AIPP + V4L2 loaned：
 
 ```text
 V4L2 MJPEG Frame
@@ -13,8 +13,7 @@ V4L2 MJPEG Frame
 ```
 
 当前默认面向 `models/yolo/yolo26n_aipp_nv12.om`。`loaned` 模式避免了 V4L2 `mmap`
-缓冲区到 `Frame::data` 的用户态复制；静态 AIPP 模型避免了 CPU 侧 NV12->RGB、归一化、
-NCHW FP32 打包。pipeline 会优先向 AscendCL detector 申请模型输入 Device buffer，
+缓冲区到 `Frame::data` 的用户态复制；静态 AIPP 模型避免了 CPU 侧 NV12->RGB、归一化和张量打包。pipeline 会优先向 AscendCL detector 申请模型输入 Device buffer，
 DVPP VPC 会直接写入该 buffer，detector 执行时跳过输入 Host->Device 拷贝。
 DVPP 预处理器会在 `open()` 后复用 JPEGD 输出 Device buffer、Host fallback 的 VPC 输出
 Device buffer、`acldvppPicDesc` 和 `acldvppResizeConfig`，避免在主循环内按帧创建和销毁这些资源。
@@ -23,7 +22,7 @@ Host NV12 缓冲区和 `acldvppPicDesc`。
 
 ## 全链路 DVPP 配置
 
-现在只需要将 `pipeline.backend` 切到 `dvpp`：
+当前配置只接受 `pipeline.backend: "dvpp"`：
 
 ```yaml
 pipeline:
@@ -75,7 +74,7 @@ V4L2 loaned MJPEG payload
 ## 当前限制
 
 - `pipeline.backend: "dvpp"` 当前要求摄像头输入为 `V4L2_PIX_FMT_MJPEG`，因为 DVPP 预处理路径使用 JPEGD 解码。
-- DVPP 预处理支持 `NV12` + `UINT8`，用于静态 AIPP OM；也保留 `NCHW` + `FP32` 兼容旧模型。
+- DVPP 预处理只支持 `NV12` + `UINT8`，用于静态 AIPP OM。
 - `camera.buffer_mode: "loaned"` 只减少 V4L2 出队后到 pipeline 的帧复制；V4L2 MJPEG 码流本身仍位于 Host。
 - 使用静态 AIPP OM 时，NV12 到 RGB、归一化等动作由模型内 AIPP 完成，不再由 CPU 打包 NCHW FP32。
 - 静态 AIPP 路径下，DVPP VPC 输出会直接写入 AscendCL 模型输入 Device buffer，避免 `DVPP -> Host -> AscendCL input` 往返拷贝。
@@ -84,7 +83,7 @@ V4L2 loaned MJPEG payload
 - DVPP 画框链路的解码使用 DVPP，但画框当前在 Host BGR24 缓冲区上完成，不是 DVPP OSD。
 - `mjpeg` 和 `debug_image` 输出最终 JPEG 编码仍复用当前 OpenCV 输出实现。
 
-因此，在当前 USB 摄像头 MJPEG、静态 AIPP OM、CPU YOLO 后处理和 OpenCV 画框架构下，DVPP/零拷贝方向已经接近边界。继续优化主要不再属于 DVPP 零拷贝问题，而是后处理逻辑、输出调度或整体架构调整。
+因此，在当前 USB 摄像头 MJPEG、静态 AIPP OM、CPU YOLO 后处理和 Host 侧调试画框架构下，DVPP/零拷贝方向已经接近边界。继续优化主要不再属于 DVPP 零拷贝问题，而是后处理逻辑、输出调度或整体架构调整。
 
 如果后续要继续追求更彻底的硬件化，需要改变链路形态：
 
@@ -169,49 +168,6 @@ scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
 ```bash
 FRAMES=500 INTERVAL=50 \
   scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
-```
-
-如果确实需要临时覆盖当前配置，也只跑一条 pipeline：
-
-```bash
-BACKEND=dvpp SINK=none FRAMES=300 \
-  scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
-```
-
-如果要做矩阵测试，先修改配置文件确认变量：
-
-```bash
-config/perf/pipeline-matrix.conf
-```
-
-当前矩阵测试支持这些变量：
-
-- `BACKENDS`：例如 `("dvpp")` 或 `("opencv" "dvpp")`
-- `BUFFER_MODES`：例如 `("loaned" "copy")`
-- `FRAMES`
-- `INTERVAL`
-- `WARMUP_FRAMES`
-
-输出通道不作为变量，脚本固定写入 `output.video_sink: "none"`，用于只观察 pipeline 主链路成本。
-每个 backend 会绑定自己的最优 profile：
-
-- `opencv`：普通 NCHW/FP32 OM，`preprocess.output_layout=NCHW`，`preprocess.output_dtype=FP32`，`normalize=true`
-- `dvpp`：静态 AIPP NV12 OM，`preprocess.output_layout=NV12`，`preprocess.output_dtype=UINT8`，`normalize=false`
-
-因此这个矩阵比较的是“OpenCV 最优软件链路”和“DVPP + AIPP 最优硬件链路”的端到端差距，不要求二者使用同一个 `.om` 文件。
-运行前需要确认部署包中同时存在 `models/yolo/yolo26n.om` 和
-`models/yolo/yolo26n_aipp_nv12.om`；脚本会在每组测试开始前检查对应模型文件。
-
-确认配置后运行：
-
-```bash
-scripts/run-board-pipeline-matrix.sh config/perf/pipeline-matrix.conf
-```
-
-脚本会为每组生成独立 CSV 和日志，并自动生成 Markdown 报告：
-
-```text
-build/board-native-debug-package/data/dev/perf/pipeline-matrix-report.md
 ```
 
 重点看 CSV 中的：

@@ -57,13 +57,13 @@ void set_channel_first(std::vector<float>& values,
 } // namespace
 
 /**
- * @brief 验证后处理策略工厂和 OpenCV YOLO 后处理基础行为。
+ * @brief 验证后处理策略工厂和 DVPP 主线 YOLO 后处理基础行为。
  * @return 成功返回 `0`，失败返回非零值。
  */
 int main()
 {
     sentinel::PostprocessConfig config;
-    config.backend = "opencv";
+    config.backend = "dvpp";
     config.model_type = "yolo";
     config.output_layout = "channels_first";
     config.num_classes = 2;
@@ -77,8 +77,8 @@ int main()
     rules.min_confidence = 0.5;
 
     auto postprocessor = sentinel::create_detection_postprocessor(config, rules);
-    expect(postprocessor->kind() == "opencv", "factory should create OpenCV postprocessor");
-    expect(postprocessor->open(), "OpenCV postprocessor should open");
+    expect(postprocessor->kind() == "dvpp", "factory should create DVPP postprocessor");
+    expect(postprocessor->open(), "DVPP postprocessor should open");
 
     constexpr std::size_t candidate_count = 3;
     constexpr std::size_t attributes = 6;
@@ -118,23 +118,14 @@ int main()
     expect(!postprocessor->debug_info().empty(), "postprocessor should expose debug summary");
     postprocessor->close();
 
-    config.backend = "dvpp";
-    auto dvpp = sentinel::create_detection_postprocessor(config, rules);
-    expect(dvpp->kind() == "dvpp", "factory should create DVPP postprocessor");
-    expect(dvpp->open(), "DVPP postprocessor should open");
-    const auto dvpp_detections = dvpp->process({output}, input);
-    expect(dvpp_detections.size() == 2U, "DVPP postprocessor should run pure C++ NMS");
-    expect(!dvpp->debug_info().empty(), "DVPP postprocessor should expose debug summary");
-    dvpp->close();
-
     bool unsupported_thrown = false;
     try {
-        config.backend = "unknown";
+        config.backend = "opencv";
         static_cast<void>(sentinel::create_detection_postprocessor(config, rules));
     } catch (const std::exception&) {
         unsupported_thrown = true;
     }
-    expect(unsupported_thrown, "unsupported postprocess backend should throw");
+    expect(unsupported_thrown, "non-DVPP postprocess backend should throw");
 
     return 0;
 }

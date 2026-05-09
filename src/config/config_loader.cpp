@@ -381,19 +381,13 @@ void load_rule_config(const std::filesystem::path& config_dir, SentinelConfig& c
  *
  * 该函数是用户配置和内部策略对象之间的边界。用户只需要选择
  * `pipeline.backend`，这里再统一设置预处理、后处理和画框后端，避免
- * 配置文件暴露过多阶段细节。DVPP 路径复用推理设备号，保证 AscendCL
- * 推理和 DVPP 预处理运行在同一张设备上。
+ * 配置文件暴露过多阶段细节。当前主线固定为 DVPP + 静态 AIPP + 零拷贝，
+ * 因此该函数只接受 `dvpp`，并复用推理设备号，保证 AscendCL 推理和
+ * DVPP 预处理运行在同一张设备上。
  * @return 无返回值。
  */
 void apply_pipeline_backend(SentinelConfig& config)
 {
-    if (config.pipeline.backend == "opencv") {
-        config.preprocess.backend = "opencv";
-        config.postprocess.backend = "opencv";
-        config.overlay.backend = "opencv";
-        return;
-    }
-
     if (config.pipeline.backend == "dvpp") {
         config.preprocess.backend = "dvpp";
         config.preprocess.device_id = config.inference.device_id;
@@ -401,16 +395,6 @@ void apply_pipeline_backend(SentinelConfig& config)
         config.overlay.backend = "dvpp";
         return;
     }
-}
-
-/**
- * @brief 判断预处理张量格式是否为传统 OpenCV 路径支持的 NCHW FP32。
- * @param config 预处理配置。
- * @return 是 NCHW/FP32 返回 `true`。
- */
-bool is_nchw_fp32_preprocess(const PreprocessConfig& config)
-{
-    return config.output_layout == "NCHW" && config.output_dtype == "FP32";
 }
 
 /**
@@ -443,14 +427,13 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
         throw std::runtime_error("at least one camera must be configured");
     }
     for (const auto& camera : config.cameras) {
-        // buffer_mode 是运行期性能实验开关，只允许明确的已知取值。
-        if (camera.buffer_mode != "copy" && camera.buffer_mode != "loaned") {
-            throw std::runtime_error("camera.buffer_mode must be either copy or loaned: " +
-                                     camera.id);
+        // 主线固定使用 V4L2 mmap 缓冲区租借，避免采集阶段额外复制。
+        if (camera.buffer_mode != "loaned") {
+            throw std::runtime_error("camera.buffer_mode must be loaned: " + camera.id);
         }
     }
-    if (config.pipeline.backend != "opencv" && config.pipeline.backend != "dvpp") {
-        throw std::runtime_error("pipeline.backend must be opencv or dvpp");
+    if (config.pipeline.backend != "dvpp") {
+        throw std::runtime_error("pipeline.backend must be dvpp");
     }
     if (config.pipeline.max_frames <= 0) {
         throw std::runtime_error("pipeline.max_frames must be greater than zero");
@@ -473,8 +456,8 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     if (config.preprocess.backend.empty()) {
         throw std::runtime_error("preprocess.backend must not be empty");
     }
-    if (config.preprocess.backend != "opencv" && config.preprocess.backend != "dvpp") {
-        throw std::runtime_error("preprocess.backend must be opencv or dvpp");
+    if (config.preprocess.backend != "dvpp") {
+        throw std::runtime_error("preprocess.backend must be dvpp");
     }
     if (config.preprocess.device_id < 0) {
         throw std::runtime_error("preprocess.device_id must not be negative");
@@ -482,22 +465,17 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     if (config.preprocess.output_width <= 0 || config.preprocess.output_height <= 0) {
         throw std::runtime_error("preprocess output size must be positive");
     }
-    if (config.preprocess.backend == "opencv" && !is_nchw_fp32_preprocess(config.preprocess)) {
-        throw std::runtime_error("opencv preprocess requires output_layout=NCHW and output_dtype=FP32");
+    if (!is_nv12_uint8_preprocess(config.preprocess)) {
+        throw std::runtime_error("dvpp preprocess requires output_layout=NV12 and output_dtype=UINT8");
     }
-    if (config.preprocess.backend == "dvpp" && !is_nchw_fp32_preprocess(config.preprocess) &&
-        !is_nv12_uint8_preprocess(config.preprocess)) {
-        throw std::runtime_error(
-            "dvpp preprocess requires NCHW/FP32 or NV12/UINT8 output format");
-    }
-    if (is_nv12_uint8_preprocess(config.preprocess) && config.preprocess.normalize) {
+    if (config.preprocess.normalize) {
         throw std::runtime_error("NV12/UINT8 preprocess requires normalize=false");
     }
     if (config.postprocess.backend.empty()) {
         throw std::runtime_error("postprocess.backend must not be empty");
     }
-    if (config.postprocess.backend != "opencv" && config.postprocess.backend != "dvpp") {
-        throw std::runtime_error("postprocess.backend must be opencv or dvpp");
+    if (config.postprocess.backend != "dvpp") {
+        throw std::runtime_error("postprocess.backend must be dvpp");
     }
     if (config.postprocess.model_type != "yolo") {
         throw std::runtime_error("postprocess.model_type currently supports only yolo");
@@ -520,8 +498,8 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     if (config.postprocess.max_detections <= 0) {
         throw std::runtime_error("postprocess.max_detections must be positive");
     }
-    if (config.overlay.backend != "opencv" && config.overlay.backend != "dvpp") {
-        throw std::runtime_error("overlay.backend must be opencv or dvpp");
+    if (config.overlay.backend != "dvpp") {
+        throw std::runtime_error("overlay.backend must be dvpp");
     }
     if (config.output.video_sink != "none" && config.output.video_sink != "debug_image" &&
         config.output.video_sink != "mjpeg") {

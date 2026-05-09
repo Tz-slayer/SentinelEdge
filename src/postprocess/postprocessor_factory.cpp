@@ -1,7 +1,6 @@
 #include "sentinel/postprocess/postprocessor_factory.hpp"
 
 #include "sentinel/postprocess/dvpp_yolo_postprocessor.hpp"
-#include "sentinel/postprocess/opencv_yolo_postprocessor.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -18,14 +17,11 @@ std::unique_ptr<DetectionPostprocessor> create_detection_postprocessor(
     const PostprocessConfig& config,
     const RuleConfig& rules)
 {
-    if (config.backend == "opencv") {
-        return std::make_unique<OpenCvYoloPostprocessor>(config, rules);
-    }
     if (config.backend == "dvpp") {
         return std::make_unique<DvppYoloPostprocessor>(config, rules);
     }
 
-    throw std::runtime_error("unsupported postprocess backend: " + config.backend);
+    throw std::runtime_error("unsupported postprocess backend, expected dvpp: " + config.backend);
 }
 
 } // namespace sentinel

@@ -9,7 +9,7 @@
 - AscendCL 推理是否能稳定加载 `.om` 模型并输出结果。
 - YOLO 后处理是否能把模型输出解析成正确检测框。
 - 本地画框、调试图和 MJPEG 预览是否能反映真实检测结果。
-- 每个阶段的耗时是否可观测，后续能对比 OpenCV、DVPP、copy、loaned 等方案。
+- 每个阶段的耗时是否可观测，后续能持续跟踪 DVPP + AIPP + loaned 主链路。
 
 ## 测试分层
 
@@ -41,7 +41,7 @@ ctest --preset dev
 
 ### 开发板原生构建测试
 
-开发板测试验证真实运行环境，包括 V4L2、AscendCL、OpenCV、模型文件和系统库。
+开发板测试验证真实运行环境，包括 V4L2、AscendCL、DVPP、模型文件和系统库。
 
 推荐命令：
 
@@ -58,7 +58,7 @@ cd build/board-native-debug-package
 
 - 程序能加载 `config/dev`。
 - 能打开 `/dev/video0`。
-- 能打开 OpenCV 图像预处理后端。
+- 能打开 DVPP 图像预处理后端。
 - 能加载 `.om` 模型。
 - 能输出每帧 debug 日志。
 - 能完成配置中的 `pipeline.max_frames`。
@@ -90,9 +90,9 @@ cd build/board-native-debug-package
 
 - 摄像头输出 `width x height` 与预期一致。
 - `pixel_format` 与摄像头探针一致。
-- 模型输入张量 shape 为 `[1,3,H,W]`。
-- 张量字节数等于 `1 * 3 * H * W * sizeof(float)`。
-- 如果摄像头输出 MJPEG，解码后没有空帧。
+- 模型输入张量 shape 为 `[1,1,H,W]`，layout 为 `NV12`，dtype 为 `UINT8`。
+- debug 日志中模型输入优先显示 `memory=device`。
+- 摄像头输出必须为 MJPEG，DVPP JPEGD/VPC 处理后没有空帧。
 
 ### 推理和后处理验收
 
@@ -167,34 +167,12 @@ scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
 scripts/run-board-mjpeg-preview.sh build/board-native-debug-package config/dev
 ```
 
-`run-board-pipeline-perf.sh` 只运行当前配置中的一条 pipeline，并把日志和 CSV 写到
-安装包的 `data/dev/perf/` 目录。需要临时覆盖单个配置时使用环境变量：
+`run-board-pipeline-perf.sh` 只运行当前主线 pipeline，并把日志和 CSV 写到
+安装包的 `data/dev/perf/` 目录。常用环境变量只保留测试帧数和聚合间隔：
 
 ```bash
-BACKEND=dvpp SINK=none FRAMES=300 \
+FRAMES=300 INTERVAL=30 \
   scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
-```
-
-如果需要做矩阵测试，先确认配置文件中的变量：
-
-```bash
-config/perf/pipeline-matrix.conf
-```
-
-当前矩阵测试只允许 `BACKENDS` 和 `BUFFER_MODES` 形成组合，输出通道固定为 `none`。
-每个 backend 使用自己的模型和 preprocess profile：OpenCV 使用普通 NCHW/FP32 OM，
-DVPP 使用静态 AIPP NV12/UINT8 OM。这个测试用于比较两套各自合理链路的性能差距，
-不是强制使用同一个模型输入格式。
-确认后运行：
-
-```bash
-scripts/run-board-pipeline-matrix.sh config/perf/pipeline-matrix.conf
-```
-
-脚本会自动生成 Markdown 报告：
-
-```text
-build/board-native-debug-package/data/dev/perf/pipeline-matrix-report.md
 ```
 
 ## 当前缺口

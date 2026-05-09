@@ -122,7 +122,7 @@ std::string make_frame_debug_message(const Frame& frame)
            " pixel_format=" + pixel_format_to_string(frame.pixel_format) +
            " bytes_used=" + std::to_string(frame.bytes_used) +
            " payload_bytes=" + std::to_string(frame.payload_size()) +
-           " payload_mode=" + (frame.is_loaned() ? "loaned" : "copy") +
+           " payload_mode=" + (frame.is_loaned() ? "loaned" : "owned") +
            " timestamp_ns=" + std::to_string(frame.timestamp_ns);
 }
 

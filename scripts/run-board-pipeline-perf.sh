@@ -5,8 +5,6 @@ PACKAGE_DIR="${1:-build/board-native-debug-package}"
 CONFIG_DIR="${2:-config/dev}"
 FRAMES="${FRAMES:-300}"
 INTERVAL="${INTERVAL:-30}"
-BACKEND="${BACKEND:-}"
-SINK="${SINK:-}"
 CSV_PATH="${CSV_PATH:-perf/pipeline.csv}"
 LOG_NAME="${LOG_NAME:-pipeline.log}"
 
@@ -25,24 +23,6 @@ if [[ ! -f "${CONFIG_FILE}" ]]; then
     exit 1
 fi
 
-case "${BACKEND}" in
-    ""|opencv|dvpp)
-        ;;
-    *)
-        printf 'unsupported BACKEND: %s\n' "${BACKEND}" >&2
-        exit 1
-        ;;
-esac
-
-case "${SINK}" in
-    ""|none|debug_image|mjpeg)
-        ;;
-    *)
-        printf 'unsupported SINK: %s\n' "${SINK}" >&2
-        exit 1
-        ;;
-esac
-
 mkdir -p "${PERF_DIR}"
 cp "${CONFIG_FILE}" "${BACKUP_FILE}"
 restore_config() {
@@ -50,18 +30,12 @@ restore_config() {
 }
 trap restore_config EXIT
 
-if [[ -n "${BACKEND}" ]]; then
-    perl -0pi -e "s/(pipeline:\\n\\s+backend: )\"(?:opencv|dvpp)\"/\${1}\"${BACKEND}\"/" \
-        "${CONFIG_FILE}"
-fi
-
-if [[ -n "${SINK}" ]]; then
-    sed -i -e "s/^  video_sink:.*/  video_sink: \"${SINK}\"/" "${CONFIG_FILE}"
-fi
-
+perl -0pi -e "s/(pipeline:\\n\\s+backend: )\"[^\"]*\"/\${1}\"dvpp\"/" \
+    "${CONFIG_FILE}"
 perl -0pi -e "s/(performance:\\n\\s+enabled: )(?:true|false)/\${1}true/" \
     "${CONFIG_FILE}"
 sed -i \
+    -e 's/^  video_sink:.*/  video_sink: "none"/' \
     -e "s/^  log_interval_frames:.*/  log_interval_frames: ${INTERVAL}/" \
     -e "s|^  csv_path:.*|  csv_path: \"${CSV_PATH}\"|" \
     -e "s/^  max_frames:.*/  max_frames: ${FRAMES}/" \
@@ -69,12 +43,7 @@ sed -i \
 
 printf 'running single pipeline perf: package=%s config=%s frames=%s interval=%s csv=%s\n' \
     "${PACKAGE_DIR}" "${CONFIG_DIR}" "${FRAMES}" "${INTERVAL}" "${CSV_PATH}"
-if [[ -n "${BACKEND}" ]]; then
-    printf 'override backend=%s\n' "${BACKEND}"
-fi
-if [[ -n "${SINK}" ]]; then
-    printf 'override sink=%s\n' "${SINK}"
-fi
+printf 'fixed profile: backend=dvpp buffer_mode=loaned sink=none\n'
 
 (
     cd "${PACKAGE_DIR}"

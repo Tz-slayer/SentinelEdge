@@ -10,9 +10,9 @@ namespace sentinel {
 /**
  * @brief DVPP 图像预处理策略。
  *
- * MJPEG 输入帧先在 DVPP 中完成 JPEGD 解码和 VPC 缩放。使用静态 AIPP
- * 模型时输出 `NV12`/`UINT8` 张量；使用旧模型时仍可输出 `NCHW`/`FP32`
- * 张量。当前输出仍会拷回 Host，后续版本会继续把输出保留在 Device 内存中。
+ * MJPEG 输入帧先在 DVPP 中完成 JPEGD 解码和 VPC 缩放。当前主线固定面向
+ * 静态 AIPP 模型输出 `NV12`/`UINT8`；当检测器提供 Device 输入缓冲区时，
+ * 预处理结果会直接写入 AscendCL Device 内存。
  */
 class DvppFramePreprocessor final : public FramePreprocessor {
 public:

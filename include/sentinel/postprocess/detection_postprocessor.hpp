@@ -11,7 +11,8 @@ namespace sentinel {
  * @brief 模型输出后处理策略接口。
  *
  * 该接口负责把推理后端输出的原始张量转换为统一的 `Detection` 列表。
- * 不同 YOLO 版本、CPU/OpenCV 后处理或后续硬件相关实现都通过该接口接入。
+ * 当前主线保留接口边界用于隔离不同 YOLO 输出形态，默认实现为纯 C++
+ * YOLO 解码和 NMS。
  */
 class DetectionPostprocessor {
 public:
@@ -48,7 +49,7 @@ public:
 
     /**
      * @brief 返回后处理策略类型标识。
-     * @return 例如 `"opencv"` 或 `"dvpp"` 的稳定字符串。
+     * @return 固定后端标识，例如 `"dvpp"`。
      */
     virtual std::string_view kind() const noexcept = 0;
 

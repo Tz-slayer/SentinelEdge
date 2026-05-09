@@ -1,7 +1,6 @@
 #include "sentinel/image/image_backend_factory.hpp"
 
 #include "sentinel/image/dvpp_image_backend.hpp"
-#include "sentinel/image/opencv_image_backend.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -15,14 +14,11 @@ namespace sentinel {
  */
 std::unique_ptr<ImageBackend> create_image_backend(const std::string& backend)
 {
-    if (backend == "opencv") {
-        return std::make_unique<OpenCvImageBackend>();
-    }
     if (backend == "dvpp") {
         return std::make_unique<DvppImageBackend>();
     }
 
-    throw std::runtime_error("unsupported image backend: " + backend);
+    throw std::runtime_error("unsupported image backend, expected dvpp: " + backend);
 }
 
 } // namespace sentinel

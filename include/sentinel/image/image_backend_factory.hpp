@@ -9,7 +9,7 @@ namespace sentinel {
 
 /**
  * @brief 根据后端名称创建图像处理后端。
- * @param backend 后端名称，例如 `"opencv"` 或 `"dvpp"`。
+ * @param backend 后端名称，当前仅支持 `"dvpp"`。
  * @return 新创建的图像处理后端对象。
  * @throws std::runtime_error 当后端名称不受支持时抛出。
  */

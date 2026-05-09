@@ -2,9 +2,7 @@
 
 #include "sentinel/ascend/acl_runtime.hpp"
 
-#include <algorithm>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <memory>
 #include <string_view>
@@ -31,16 +29,6 @@ bool wants_nv12_tensor(const PreprocessConfig& config) noexcept
     return config.output_layout == "NV12" && config.output_dtype == "UINT8";
 }
 
-/**
- * @brief 判断预处理配置是否请求输出传统 RGB NCHW FP32 张量。
- * @param config 预处理配置。
- * @return 请求 NCHW/FP32 输出返回 `true`。
- */
-bool wants_nchw_fp32_tensor(const PreprocessConfig& config) noexcept
-{
-    return config.output_layout == "NCHW" && config.output_dtype == "FP32";
-}
-
 #if SENTINEL_ENABLE_DVPP
 
 /**
@@ -52,16 +40,6 @@ bool wants_nchw_fp32_tensor(const PreprocessConfig& config) noexcept
 std::uint32_t align_up(std::uint32_t value, std::uint32_t alignment)
 {
     return ((value + alignment - 1U) / alignment) * alignment;
-}
-
-/**
- * @brief 将整数裁剪到 `uint8_t` 可表示范围。
- * @param value 待裁剪整数。
- * @return 裁剪后的 8 位无符号值。
- */
-std::uint8_t clamp_u8(int value)
-{
-    return static_cast<std::uint8_t>(std::clamp(value, 0, 255));
 }
 
 /**
@@ -83,56 +61,6 @@ bool is_mjpeg_frame(const Frame& frame)
 std::uint32_t yuv420sp_size(std::uint32_t width_stride, std::uint32_t height_stride)
 {
     return width_stride * height_stride * 3U / 2U;
-}
-
-/**
- * @brief 将一帧 NV12 数据转换并打包为 RGB NCHW FP32。
- * @param nv12 包含 Y 平面和 UV 交错平面的 Host 缓冲区。
- * @param width 有效图像宽度。
- * @param height 有效图像高度。
- * @param width_stride Y/UV 平面行跨度。
- * @param height_stride Y 平面对齐高度。
- * @param normalize 是否按 1/255 归一化。
- * @return NCHW FP32 字节缓冲区，通道顺序为 RGB。
- */
-std::vector<std::uint8_t> pack_nv12_to_rgb_nchw_fp32(const std::vector<std::uint8_t>& nv12,
-                                                     int width,
-                                                     int height,
-                                                     std::uint32_t width_stride,
-                                                     std::uint32_t height_stride,
-                                                     bool normalize)
-{
-    const auto plane_size = static_cast<std::size_t>(width) *
-                            static_cast<std::size_t>(height);
-    std::vector<float> chw(plane_size * 3U);
-    const auto* y_plane = nv12.data();
-    const auto* uv_plane = nv12.data() +
-                           static_cast<std::size_t>(width_stride) * height_stride;
-    const auto scale = normalize ? (1.0F / 255.0F) : 1.0F;
-
-    for (int row = 0; row < height; ++row) {
-        for (int col = 0; col < width; ++col) {
-            const auto y = static_cast<int>(y_plane[static_cast<std::size_t>(row) *
-                                                    width_stride + col]);
-            const auto uv_index = static_cast<std::size_t>(row / 2) * width_stride +
-                                  static_cast<std::size_t>(col / 2) * 2U;
-            const auto u = static_cast<int>(uv_plane[uv_index]) - 128;
-            const auto v = static_cast<int>(uv_plane[uv_index + 1U]) - 128;
-
-            const auto r = clamp_u8(y + ((1436 * v) >> 10));
-            const auto g = clamp_u8(y - ((352 * u + 731 * v) >> 10));
-            const auto b = clamp_u8(y + ((1815 * u) >> 10));
-            const auto pixel_index = static_cast<std::size_t>(row) * width + col;
-
-            chw[pixel_index] = static_cast<float>(r) * scale;
-            chw[plane_size + pixel_index] = static_cast<float>(g) * scale;
-            chw[plane_size * 2U + pixel_index] = static_cast<float>(b) * scale;
-        }
-    }
-
-    std::vector<std::uint8_t> bytes(chw.size() * sizeof(float));
-    std::memcpy(bytes.data(), chw.data(), bytes.size());
-    return bytes;
 }
 
 /**
@@ -385,11 +313,11 @@ public:
             last_error_ = "preprocess output size must be positive";
             return false;
         }
-        if (!wants_nchw_fp32_tensor(config_) && !wants_nv12_tensor(config_)) {
-            last_error_ = "DVPP preprocessor supports NCHW/FP32 or NV12/UINT8 output";
+        if (!wants_nv12_tensor(config_)) {
+            last_error_ = "DVPP preprocessor supports only NV12/UINT8 output";
             return false;
         }
-        if (wants_nv12_tensor(config_) && config_.normalize) {
+        if (config_.normalize) {
             last_error_ = "NV12/UINT8 output requires normalize=false";
             return false;
         }
@@ -485,7 +413,7 @@ public:
             return std::nullopt;
         }
         if (!is_mjpeg_frame(frame)) {
-            last_error_ = "DVPP copy preprocessor currently supports only MJPEG frames";
+            last_error_ = "DVPP preprocessor currently supports only MJPEG frames";
             return std::nullopt;
         }
         const auto* payload = frame.payload_data();
@@ -609,19 +537,9 @@ public:
         }
 
         TensorBuffer tensor;
-        if (wants_nv12_tensor(config_)) {
-            // 静态 AIPP 模型直接消费 NV12/YUV420SP_U8，避免 CPU 侧 RGB/NCHW/FP32 打包。
-            tensor.data = std::move(host_nv12);
-            tensor.shape = {1, 1, config_.output_height, config_.output_width};
-        } else {
-            tensor.data = pack_nv12_to_rgb_nchw_fp32(host_nv12,
-                                                     config_.output_width,
-                                                     config_.output_height,
-                                                     output_width_stride,
-                                                     output_height_stride,
-                                                     config_.normalize);
-            tensor.shape = {1, 3, config_.output_height, config_.output_width};
-        }
+        // 静态 AIPP 模型直接消费 NV12/YUV420SP_U8，避免 CPU 侧 RGB/NCHW/FP32 打包。
+        tensor.data = std::move(host_nv12);
+        tensor.shape = {1, 1, config_.output_height, config_.output_width};
         tensor.layout = config_.output_layout;
         tensor.dtype = config_.output_dtype;
         tensor.frame_sequence = frame.sequence;
@@ -645,7 +563,7 @@ public:
     std::optional<TensorBuffer> process_into(const Frame& frame, TensorBuffer target)
     {
 #if SENTINEL_ENABLE_DVPP
-        if (!wants_nv12_tensor(config_) || !target.is_device()) {
+        if (!target.is_device()) {
             return process(frame);
         }
         if (target.device_data == nullptr || target.device_bytes == 0U) {

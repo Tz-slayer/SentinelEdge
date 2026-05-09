@@ -11,9 +11,8 @@ namespace sentinel {
 /**
  * @brief 通用图像处理后端接口。
  *
- * 该接口承载解码、缩放、张量打包和绘制检测框等图像能力。它不直接
- * 表达 pipeline 阶段语义；`FramePreprocessor`、后续 `OverlayRenderer`
- * 等阶段对象应组合该接口完成具体工作。
+ * 该接口只承载调试输出链路需要的解码、缩放和检测框绘制能力。模型输入
+ * 张量由 `FramePreprocessor` 直接生成，避免调试图像路径重新进入推理主链路。
  */
 class ImageBackend {
 public:
@@ -56,19 +55,6 @@ public:
     virtual std::optional<ImageBuffer> resize(const ImageBuffer& image, int width, int height) = 0;
 
     /**
-     * @brief 将图像转换为模型输入张量。
-     * @param image 输入图像缓冲区。
-     * @param config 预处理输出配置。
-     * @param frame_sequence 来源帧序号。
-     * @param camera_id 来源摄像头 ID。
-     * @return 成功返回模型输入张量；失败返回空并更新 `last_error()`。
-     */
-    virtual std::optional<TensorBuffer> to_tensor(const ImageBuffer& image,
-                                                  const PreprocessConfig& config,
-                                                  int frame_sequence,
-                                                  const std::string& camera_id) = 0;
-
-    /**
      * @brief 在图像上绘制检测结果。
      * @param image 输入图像缓冲区。
      * @param detections 待绘制的检测结果，坐标使用归一化矩形。
@@ -80,7 +66,7 @@ public:
 
     /**
      * @brief 返回图像后端类型标识。
-     * @return 例如 `"opencv"` 或 `"dvpp"` 的稳定字符串。
+     * @return 固定后端标识，例如 `"dvpp"`。
      */
     virtual std::string_view kind() const noexcept = 0;
 

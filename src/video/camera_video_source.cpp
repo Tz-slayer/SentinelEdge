@@ -142,8 +142,8 @@ bool CameraVideoSource::open()
 {
     close();
 
-    if (config_.buffer_mode != "copy" && config_.buffer_mode != "loaned") {
-        last_error_ = "unsupported V4L2 buffer mode: " + config_.buffer_mode;
+    if (config_.buffer_mode != "loaned") {
+        last_error_ = "unsupported V4L2 buffer mode, expected loaned: " + config_.buffer_mode;
         return false;
     }
 
@@ -233,20 +233,10 @@ std::optional<Frame> CameraVideoSource::read_frame()
     frame.timestamp_ns = to_timestamp_ns(buffer.timestamp);
     frame.bytes_used = bytes_used;
 
-    if (config_.buffer_mode == "loaned") {
-        // loaned 模式不复制载荷，由 Frame 租约控制 QBUF 归还时机。
-        frame.loaned_data = start;
-        frame.loaned_size = bytes_used;
-        frame.payload_lease = std::make_shared<V4l2BufferLease>(device_state_, buffer);
-    } else {
-        frame.data.assign(start, start + bytes_used);
-
-        // copy 模式复制完成后立即把缓冲区放回驱动队列，供后续帧继续复用。
-        if (xioctl(fd_, VIDIOC_QBUF, &buffer) == -1) {
-            set_error_from_errno("VIDIOC_QBUF failed");
-            return std::nullopt;
-        }
-    }
+    // 主线固定使用 loaned 模式，不复制载荷，由 Frame 租约控制 QBUF 归还时机。
+    frame.loaned_data = start;
+    frame.loaned_size = bytes_used;
+    frame.payload_lease = std::make_shared<V4l2BufferLease>(device_state_, buffer);
 
     return frame;
 }
