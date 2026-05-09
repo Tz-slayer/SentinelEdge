@@ -257,13 +257,12 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
         const auto debug_output_dir = config.service.data_dir / config.output.debug_image_dir;
         logger.info("debug image output_dir=" + debug_output_dir.string() +
                     " interval=" + std::to_string(config.output.debug_image_interval));
-    } else if (config.output.video_sink == "rtsp") {
-        logger.info("rtsp output_url=" + config.output.rtsp_url +
-                    " fps=" + std::to_string(config.output.rtsp_fps) +
-                    " encoder=" + config.output.rtsp_encoder +
-                    " write_timeout_ms=" +
-                    std::to_string(config.output.rtsp_write_timeout_ms) +
-                    " ffmpeg=" + config.output.ffmpeg_path);
+    } else if (config.output.video_sink == "mjpeg") {
+        logger.info("mjpeg bind=" + config.output.mjpeg_host + ":" +
+                    std::to_string(config.output.mjpeg_port) +
+                    " path=" + config.output.mjpeg_path +
+                    " quality=" + std::to_string(config.output.mjpeg_quality) +
+                    " max_clients=" + std::to_string(config.output.mjpeg_max_clients));
     }
     if (!video_sink->open()) {
         const auto error_message = "unable to open " + std::string(video_sink->kind()) +

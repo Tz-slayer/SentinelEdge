@@ -120,16 +120,16 @@ output.video_sink: "debug_image"
   -> ImageBackend::draw_detections
   -> 保存 JPEG 到 runtime.data_dir / output.debug_image_dir
 
-output.video_sink: "rtsp"
-  -> RtspVideoSink
+output.video_sink: "mjpeg"
+  -> MjpegHttpSink
   -> ImageBackend::decode
   -> ImageBackend::draw_detections
-  -> 写入 ffmpeg stdin
-  -> RTSP 输出
+  -> JPEG 编码
+  -> HTTP multipart MJPEG 输出
 ```
 
-开发配置和生产配置当前默认使用 `rtsp`，便于直接验证带框实时预览。需要定位画框问题时，
-可以临时切回 `debug_image` 保存 JPEG。
+开发配置当前默认使用 `mjpeg`，便于浏览器直接验证带框实时预览。需要定位单帧画框问题时，
+可以临时切回 `debug_image` 保存 JPEG。生产配置默认不启用视频输出，后续再接入 MediaMTX。
 
 ## 配置建议
 
@@ -144,14 +144,14 @@ overlay:
   backend: "opencv"
 
 output:
-  video_sink: "rtsp"             # none / debug_image / rtsp
+  video_sink: "mjpeg"            # none / debug_image / mjpeg
   debug_image_dir: "debug/frames"
   debug_image_interval: 1
-  rtsp_url: "rtsp://0.0.0.0:8554/sentinel"
-  rtsp_fps: 10
-  rtsp_encoder: "libx264"
-  rtsp_write_timeout_ms: 1000
-  ffmpeg_path: "ffmpeg"
+  mjpeg_host: "0.0.0.0"
+  mjpeg_port: 8081
+  mjpeg_path: "/stream"
+  mjpeg_quality: 80
+  mjpeg_max_clients: 4
 ```
 
 这样后续可以按阶段分别对比：
@@ -178,6 +178,6 @@ image:
 2. 使用 `OpenCvImageBackend::draw_detections` 实现 OpenCV 画框。
 3. 使用 `DebugImageSink` 保存带框 JPEG，验证坐标正确性。
 4. 在开发板上用真实摄像头和 `.om` 模型确认调试图、日志和后处理结果一致。
-5. 接入 RTSP 推流输出，把带框视频作为实时预览流暴露给播放器或 Web 转码网关。
-6. 增加 Web 可直接播放的 HLS、WebRTC 或 RTSP-to-Web 网关。
+5. 接入 MJPEG HTTP 调试预览，让浏览器直接查看带框视频。
+6. 后续接入 MediaMTX，提供 RTSP、HLS 或 WebRTC 等正式流媒体能力。
 7. 最后实现 `DvppImageBackend` 的硬件解码、缩放、张量准备或 OSD 能力。

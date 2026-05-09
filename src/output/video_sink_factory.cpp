@@ -1,8 +1,8 @@
 #include "sentinel/output/video_sink_factory.hpp"
 
 #include "sentinel/output/debug_image_sink.hpp"
+#include "sentinel/output/mjpeg_http_sink.hpp"
 #include "sentinel/output/null_video_sink.hpp"
-#include "sentinel/output/rtsp_video_sink.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -26,8 +26,8 @@ std::unique_ptr<VideoSink> create_video_sink(const OutputConfig& output,
     if (output.video_sink == "debug_image") {
         return std::make_unique<DebugImageSink>(output, overlay, service.data_dir);
     }
-    if (output.video_sink == "rtsp") {
-        return std::make_unique<RtspVideoSink>(output, overlay);
+    if (output.video_sink == "mjpeg") {
+        return std::make_unique<MjpegHttpSink>(output, overlay);
     }
 
     throw std::runtime_error("unsupported output.video_sink: " + output.video_sink);

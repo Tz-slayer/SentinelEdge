@@ -26,7 +26,7 @@
 模型后处理已经抽象为策略接口，当前 `opencv` 后端支持 YOLO FP32 输出解析、置信度过滤和 OpenCV DNN NMS；`dvpp` 后处理仍是明确的未实现占位。
 摄像头配置已经预留运行期缓冲区模式开关：`buffer_mode: "copy"` 表示稳定的复制模式，`buffer_mode: "loaned"` 预留给后续 V4L2 零拷贝租借缓冲区模式。
 图像处理能力已经统一抽象为 `ImageBackend`，当前 `opencv` 后端支持解码、缩放、张量打包和检测框绘制，`debug_image` 输出通道可以在开发板上保存带框 JPEG，用于验证检测结果是否可视化正确。
-视频输出已经抽象为 `VideoSink`，当前支持 `none`、`debug_image` 和 `rtsp`。`rtsp` 第一版通过 Linux `pipe/fork/exec/write` 启动 ffmpeg，把带框 BGR24 原始帧送入 ffmpeg，由 ffmpeg 负责 H.264 编码和 RTSP listen 输出。
+视频输出已经抽象为 `VideoSink`，当前支持 `none`、`debug_image` 和 `mjpeg`。`mjpeg` 使用 Linux socket 启动本地 HTTP MJPEG 调试预览，浏览器可以直接查看带框画面；后续再接入 MediaMTX 做生产级 RTSP/ WebRTC 网关。
 
 ## 构建要求
 
@@ -34,7 +34,6 @@
 - 若使用 `CMakePresets.json`，建议 CMake 3.21+
 - 支持 C++17 的编译器
 - 使用 `preprocess.backend: "opencv"` 时，需要安装 OpenCV 开发库，至少包含 `core`、`imgproc`、`imgcodecs` 组件
-- 使用 `output.video_sink: "rtsp"` 时，需要开发板运行环境安装 `ffmpeg`
 
 ## 构建与测试
 
@@ -181,14 +180,14 @@ overlay:
   backend: "opencv"          # opencv / dvpp
 
 output:
-  video_sink: "rtsp"         # none / debug_image / rtsp
+  video_sink: "mjpeg"        # none / debug_image / mjpeg
   debug_image_dir: "debug/frames"
   debug_image_interval: 1
-  rtsp_url: "rtsp://0.0.0.0:8554/sentinel"
-  rtsp_fps: 10
-  rtsp_encoder: "libx264"
-  rtsp_write_timeout_ms: 1000
-  ffmpeg_path: "ffmpeg"
+  mjpeg_host: "0.0.0.0"
+  mjpeg_port: 8081
+  mjpeg_path: "/stream"
+  mjpeg_quality: 80
+  mjpeg_max_clients: 4
 ```
 
 如果把 `video_sink` 改成 `debug_image`，运行后会把带框 JPEG 写到：
@@ -203,13 +202,13 @@ output:
 frame-<camera_id>-<frame_sequence>.jpg
 ```
 
-`config/dev` 和 `config/prod` 当前默认启用 `rtsp`。在开发板运行后，可以用同网段电脑上的 VLC 或 ffplay 访问：
+`config/dev` 当前默认启用 `mjpeg`。在开发板运行后，可以用浏览器访问：
 
 ```text
-rtsp://<开发板IP>:8554/sentinel
+http://<开发板IP>:8081/stream
 ```
 
-第一版 RTSP 使用 ffmpeg 的 listen 模式。如果启动后没有客户端连接，或者客户端/网络消费速度过慢，写入 ffmpeg 的管道可能超时，程序会输出 `rtsp_write_timeout_ms` 相关错误。调试时建议先打开播放器，再启动 `video_sentinel`。
+MJPEG 只用于本地调试预览，优点是简单、浏览器直接支持；缺点是带宽高、没有音频、不是生产级流媒体协议。生产配置默认仍使用 `output.video_sink: "none"`，后续需要正式流媒体网关时再接入 MediaMTX。
 
 本机交叉编译部署构建：
 
@@ -549,21 +548,21 @@ cmake --build build
 - `overlay.backend`
   检测框绘制使用的图像后端，当前支持 `opencv` 和预留的 `dvpp`
 - `output.video_sink`
-  视频结果输出通道，当前支持 `none`、`debug_image` 和 `rtsp`
+  视频结果输出通道，当前支持 `none`、`debug_image` 和 `mjpeg`
 - `output.debug_image_dir`
   `debug_image` 输出目录，相对于 `runtime.data_dir`
 - `output.debug_image_interval`
   `debug_image` 每隔多少帧保存一张图
-- `output.rtsp_url`
-  RTSP listen 地址，例如 `rtsp://0.0.0.0:8554/sentinel`
-- `output.rtsp_fps`
-  写给 ffmpeg 的输入帧率
-- `output.rtsp_encoder`
-  ffmpeg 使用的视频编码器，默认 `libx264`
-- `output.rtsp_write_timeout_ms`
-  写入 ffmpeg 标准输入的超时时间，防止 RTSP 客户端阻塞拖死推理主循环
-- `output.ffmpeg_path`
-  ffmpeg 可执行文件路径或命令名
+- `output.mjpeg_host`
+  MJPEG 调试预览监听地址，默认 `0.0.0.0`
+- `output.mjpeg_port`
+  MJPEG 调试预览监听端口，默认 `8081`
+- `output.mjpeg_path`
+  浏览器访问路径，默认 `/stream`
+- `output.mjpeg_quality`
+  JPEG 编码质量，范围 `1..100`
+- `output.mjpeg_max_clients`
+  最大同时调试客户端数量
 
 例如：
 
@@ -596,4 +595,4 @@ cmake --build build
 - [项目背景](docs/project-background.md)
 - [项目结构](docs/project-structure.md)
 - [图像处理后端设计](docs/image-processing-backend.md)
-- [RTSP 输出设计](docs/rtsp-output.md)
+- [MJPEG 调试预览设计](docs/mjpeg-preview.md)

@@ -235,16 +235,16 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             config.output.debug_image_dir = value;
         } else if (section == "output" && key == "debug_image_interval") {
             config.output.debug_image_interval = std::stoi(value);
-        } else if (section == "output" && key == "rtsp_url") {
-            config.output.rtsp_url = value;
-        } else if (section == "output" && key == "rtsp_fps") {
-            config.output.rtsp_fps = std::stoi(value);
-        } else if (section == "output" && key == "rtsp_encoder") {
-            config.output.rtsp_encoder = value;
-        } else if (section == "output" && key == "rtsp_write_timeout_ms") {
-            config.output.rtsp_write_timeout_ms = std::stoi(value);
-        } else if (section == "output" && key == "ffmpeg_path") {
-            config.output.ffmpeg_path = value;
+        } else if (section == "output" && key == "mjpeg_host") {
+            config.output.mjpeg_host = value;
+        } else if (section == "output" && key == "mjpeg_port") {
+            config.output.mjpeg_port = std::stoi(value);
+        } else if (section == "output" && key == "mjpeg_path") {
+            config.output.mjpeg_path = value;
+        } else if (section == "output" && key == "mjpeg_quality") {
+            config.output.mjpeg_quality = std::stoi(value);
+        } else if (section == "output" && key == "mjpeg_max_clients") {
+            config.output.mjpeg_max_clients = std::stoi(value);
         } else if (section == "runtime" && key == "data_dir") {
             config.service.data_dir = value;
         } else if (section == "pipeline" && key == "max_frames") {
@@ -454,26 +454,26 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
         throw std::runtime_error("overlay.backend must be opencv or dvpp");
     }
     if (config.output.video_sink != "none" && config.output.video_sink != "debug_image" &&
-        config.output.video_sink != "rtsp") {
-        throw std::runtime_error("output.video_sink must be none, debug_image or rtsp");
+        config.output.video_sink != "mjpeg") {
+        throw std::runtime_error("output.video_sink must be none, debug_image or mjpeg");
     }
     if (config.output.debug_image_interval <= 0) {
         throw std::runtime_error("output.debug_image_interval must be positive");
     }
-    if (config.output.rtsp_url.empty()) {
-        throw std::runtime_error("output.rtsp_url must not be empty");
+    if (config.output.mjpeg_host.empty()) {
+        throw std::runtime_error("output.mjpeg_host must not be empty");
     }
-    if (config.output.rtsp_fps <= 0) {
-        throw std::runtime_error("output.rtsp_fps must be positive");
+    if (config.output.mjpeg_port <= 0 || config.output.mjpeg_port > 65535) {
+        throw std::runtime_error("output.mjpeg_port must be in 1..65535");
     }
-    if (config.output.rtsp_encoder.empty()) {
-        throw std::runtime_error("output.rtsp_encoder must not be empty");
+    if (config.output.mjpeg_path.empty() || config.output.mjpeg_path.front() != '/') {
+        throw std::runtime_error("output.mjpeg_path must start with /");
     }
-    if (config.output.rtsp_write_timeout_ms <= 0) {
-        throw std::runtime_error("output.rtsp_write_timeout_ms must be positive");
+    if (config.output.mjpeg_quality <= 0 || config.output.mjpeg_quality > 100) {
+        throw std::runtime_error("output.mjpeg_quality must be in 1..100");
     }
-    if (config.output.ffmpeg_path.empty()) {
-        throw std::runtime_error("output.ffmpeg_path must not be empty");
+    if (config.output.mjpeg_max_clients <= 0) {
+        throw std::runtime_error("output.mjpeg_max_clients must be positive");
     }
     if (config.rules.hold_frames <= 0) {
         throw std::runtime_error("events.hold_frames must be greater than zero");

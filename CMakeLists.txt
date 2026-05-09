@@ -138,7 +138,6 @@ set(SENTINEL_CORE_SOURCES
     src/logging/stderr_logger.cpp
     src/logging/syslog_logger.cpp
     src/output/null_video_sink.cpp
-    src/output/rtsp_video_sink.cpp
     src/output/video_sink_factory.cpp
     src/postprocess/dvpp_yolo_postprocessor.cpp
     src/postprocess/postprocessor_factory.cpp
@@ -163,12 +162,14 @@ if(ENABLE_OPENCV_PREPROCESSOR)
     list(APPEND SENTINEL_CORE_SOURCES
         src/image/opencv_image_backend.cpp
         src/output/debug_image_sink.cpp
+        src/output/mjpeg_http_sink.cpp
         src/preprocess/opencv_frame_preprocessor.cpp
     )
 else()
     list(APPEND SENTINEL_CORE_SOURCES
         src/image/opencv_image_backend_stub.cpp
         src/output/debug_image_sink_stub.cpp
+        src/output/mjpeg_http_sink_stub.cpp
         src/preprocess/opencv_frame_preprocessor_stub.cpp
     )
 endif()

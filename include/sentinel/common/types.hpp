@@ -79,19 +79,19 @@ struct OverlayConfig {
 /**
  * @brief 视频输出通道配置。
  *
- * 当前支持 `none`、`debug_image` 和 `rtsp`。`debug_image` 会把画框后的 JPEG
- * 保存到 `ServiceConfig::data_dir / debug_image_dir`，`rtsp` 会把带框视频帧写入
- * 外部编码/推流进程，用于 Web 或播放器实时预览。
+ * 当前支持 `none`、`debug_image` 和 `mjpeg`。`debug_image` 会把画框后的 JPEG
+ * 保存到 `ServiceConfig::data_dir / debug_image_dir`，`mjpeg` 会启动本地 HTTP
+ * MJPEG 调试预览服务，浏览器可直接访问。
  */
 struct OutputConfig {
     std::string video_sink{"none"};
     std::filesystem::path debug_image_dir{"debug/frames"};
     int debug_image_interval{1};
-    std::string rtsp_url{"rtsp://0.0.0.0:8554/sentinel"};
-    int rtsp_fps{10};
-    std::string rtsp_encoder{"libx264"};
-    int rtsp_write_timeout_ms{1000};
-    std::string ffmpeg_path{"ffmpeg"};
+    std::string mjpeg_host{"0.0.0.0"};
+    int mjpeg_port{8081};
+    std::string mjpeg_path{"/stream"};
+    int mjpeg_quality{80};
+    int mjpeg_max_clients{4};
 };
 
 /**

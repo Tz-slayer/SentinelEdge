@@ -91,20 +91,17 @@ int main()
 
     debug_sink->close();
 
-    sentinel::OutputConfig rtsp_output;
-    rtsp_output.video_sink = "rtsp";
-    rtsp_output.rtsp_url = "rtsp://0.0.0.0:8554/unit-test";
-    rtsp_output.rtsp_fps = 10;
-    rtsp_output.rtsp_encoder = "libx264";
-    rtsp_output.rtsp_write_timeout_ms = 1000;
-    rtsp_output.ffmpeg_path = "ffmpeg";
-    auto rtsp_sink = sentinel::create_video_sink(rtsp_output, overlay, service);
-    expect(rtsp_sink->kind() == "rtsp", "factory should create RTSP video sink");
-
-    rtsp_output.ffmpeg_path = "/definitely-not-existing-ffmpeg";
-    auto missing_ffmpeg_sink = sentinel::create_video_sink(rtsp_output, overlay, service);
-    expect(!missing_ffmpeg_sink->open(), "RTSP sink should reject missing ffmpeg executable");
-    expect(!missing_ffmpeg_sink->last_error().empty(), "RTSP sink should expose ffmpeg error");
+    sentinel::OutputConfig mjpeg_output;
+    mjpeg_output.video_sink = "mjpeg";
+    mjpeg_output.mjpeg_host = "127.0.0.1";
+    mjpeg_output.mjpeg_port = 0;
+    mjpeg_output.mjpeg_path = "/stream";
+    mjpeg_output.mjpeg_quality = 80;
+    mjpeg_output.mjpeg_max_clients = 2;
+    auto mjpeg_sink = sentinel::create_video_sink(mjpeg_output, overlay, service);
+    expect(mjpeg_sink->kind() == "mjpeg", "factory should create MJPEG HTTP sink");
+    expect(!mjpeg_sink->open(), "MJPEG sink should reject invalid port");
+    expect(!mjpeg_sink->last_error().empty(), "MJPEG sink should expose config error");
 
     std::filesystem::remove_all(service.data_dir);
     return 0;
