@@ -44,6 +44,11 @@ output:
   mjpeg_quality: 80
   mjpeg_max_clients: 4
 
+performance:
+  enabled: false
+  log_interval_frames: 30
+  csv_path: ""
+
 runtime:
   data_dir: "/var/lib/video-sentinel"
 

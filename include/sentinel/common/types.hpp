@@ -95,6 +95,18 @@ struct OutputConfig {
 };
 
 /**
+ * @brief 性能统计配置。
+ *
+ * 该配置控制 pipeline 是否输出阶段耗时。`csv_path` 为空时只输出聚合日志；
+ * 非空时逐帧写入 CSV，便于开发板上做 `none/debug_image/mjpeg` 等对照实验。
+ */
+struct PerformanceConfig {
+    bool enabled{true};
+    int log_interval_frames{30};
+    std::filesystem::path csv_path;
+};
+
+/**
  * @brief 单路摄像头或视频流输入配置。
  *
  * `buffer_mode` 用于控制视频帧缓冲区的数据通路：`copy` 表示 V4L2
@@ -133,6 +145,7 @@ struct SentinelConfig {
     PostprocessConfig postprocess;
     OverlayConfig overlay;
     OutputConfig output;
+    PerformanceConfig performance;
     std::vector<CameraConfig> cameras;
     RuleConfig rules;
 };

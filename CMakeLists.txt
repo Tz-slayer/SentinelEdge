@@ -139,6 +139,7 @@ set(SENTINEL_CORE_SOURCES
     src/logging/syslog_logger.cpp
     src/output/null_video_sink.cpp
     src/output/video_sink_factory.cpp
+    src/perf/performance_stats.cpp
     src/postprocess/dvpp_yolo_postprocessor.cpp
     src/postprocess/postprocessor_factory.cpp
     src/preprocess/dvpp_frame_preprocessor.cpp
@@ -367,6 +368,20 @@ if(ENABLE_TESTS)
     add_test(
         NAME sentinel.logging
         COMMAND sentinel_logging_tests
+    )
+
+    add_executable(sentinel_performance_tests
+        tests/unit/performance_stats_test.cpp
+    )
+
+    target_link_libraries(sentinel_performance_tests
+        PRIVATE
+            sentinel_core
+    )
+
+    add_test(
+        NAME sentinel.performance_stats
+        COMMAND sentinel_performance_tests
     )
 
     if(ENABLE_MOCK_SOURCES)

@@ -245,6 +245,12 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             config.output.mjpeg_quality = std::stoi(value);
         } else if (section == "output" && key == "mjpeg_max_clients") {
             config.output.mjpeg_max_clients = std::stoi(value);
+        } else if (section == "performance" && key == "enabled") {
+            config.performance.enabled = parse_bool(value);
+        } else if (section == "performance" && key == "log_interval_frames") {
+            config.performance.log_interval_frames = std::stoi(value);
+        } else if (section == "performance" && key == "csv_path") {
+            config.performance.csv_path = value;
         } else if (section == "runtime" && key == "data_dir") {
             config.service.data_dir = value;
         } else if (section == "pipeline" && key == "max_frames") {
@@ -474,6 +480,9 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     }
     if (config.output.mjpeg_max_clients <= 0) {
         throw std::runtime_error("output.mjpeg_max_clients must be positive");
+    }
+    if (config.performance.log_interval_frames <= 0) {
+        throw std::runtime_error("performance.log_interval_frames must be positive");
     }
     if (config.rules.hold_frames <= 0) {
         throw std::runtime_error("events.hold_frames must be greater than zero");

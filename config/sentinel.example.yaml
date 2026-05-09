@@ -44,6 +44,11 @@ output:
   mjpeg_quality: 80
   mjpeg_max_clients: 4
 
+performance:
+  enabled: true
+  log_interval_frames: 30
+  csv_path: "perf/pipeline.csv"
+
 runtime:
   data_dir: "./data"
 

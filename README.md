@@ -563,6 +563,12 @@ cmake --build build
   JPEG 编码质量，范围 `1..100`
 - `output.mjpeg_max_clients`
   最大同时调试客户端数量
+- `performance.enabled`
+  是否启用 pipeline 性能统计
+- `performance.log_interval_frames`
+  每多少帧输出一次性能聚合日志
+- `performance.csv_path`
+  性能 CSV 输出路径；相对路径会写到 `runtime.data_dir` 下，空字符串表示不输出 CSV
 
 例如：
 
@@ -597,3 +603,12 @@ cmake --build build
 - [图像处理后端设计](docs/image-processing-backend.md)
 - [MJPEG 调试预览设计](docs/mjpeg-preview.md)
 - [测试策略讨论稿](docs/testing-strategy.md)
+
+## 常用脚本
+
+- `scripts/board-native-build.sh`
+  在开发板本机执行 Debug 构建并安装到 `build/board-native-debug-package`
+- `scripts/run-board-mjpeg-preview.sh`
+  临时启用 MJPEG 预览并运行 `video_sentinel`
+- `scripts/run-board-perf-matrix.sh`
+  依次运行 `none`、`debug_image`、`mjpeg` 三组输出通道性能对照，并生成日志和 CSV
