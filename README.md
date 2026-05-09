@@ -633,5 +633,9 @@ cmake --build build
   临时启用 MJPEG 预览并运行 `video_sentinel`
 - `scripts/run-board-pipeline-perf.sh`
   只运行当前配置中的一条 pipeline，并生成一份性能日志和一份 CSV
+- `scripts/run-board-pipeline-matrix.sh`
+  按 `config/perf/pipeline-matrix.conf` 运行受控矩阵测试，输出通道固定为 `none`，并自动生成 Markdown 报告
+- `scripts/generate-pipeline-perf-report.py`
+  从 pipeline 性能 CSV 汇总生成 Markdown 报告
 - `scripts/run-board-dvpp-probe.sh`
   在开发板上运行 `sentinel_dvpp_probe`，验证 DVPP runtime 和可选 JPEG 预处理

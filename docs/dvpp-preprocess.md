@@ -178,6 +178,34 @@ BACKEND=dvpp SINK=none FRAMES=300 \
   scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
 ```
 
+如果要做矩阵测试，先修改配置文件确认变量：
+
+```bash
+config/perf/pipeline-matrix.conf
+```
+
+当前矩阵测试只支持这些变量：
+
+- `BACKENDS`：例如 `("dvpp")` 或 `("opencv" "dvpp")`
+- `BUFFER_MODES`：例如 `("loaned" "copy")`
+- `FRAMES`
+- `INTERVAL`
+- `WARMUP_FRAMES`
+
+输出通道不作为变量，脚本固定写入 `output.video_sink: "none"`，用于只观察 pipeline 主链路成本。
+
+确认配置后运行：
+
+```bash
+scripts/run-board-pipeline-matrix.sh config/perf/pipeline-matrix.conf
+```
+
+脚本会为每组生成独立 CSV 和日志，并自动生成 Markdown 报告：
+
+```text
+build/board-native-debug-package/data/dev/perf/pipeline-matrix-report.md
+```
+
 重点看 CSV 中的：
 
 - `preprocess_ms`

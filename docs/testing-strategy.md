@@ -175,6 +175,25 @@ BACKEND=dvpp SINK=none FRAMES=300 \
   scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
 ```
 
+如果需要做矩阵测试，先确认配置文件中的变量：
+
+```bash
+config/perf/pipeline-matrix.conf
+```
+
+当前矩阵测试只允许 `BACKENDS` 和 `BUFFER_MODES` 形成组合，输出通道固定为 `none`。
+确认后运行：
+
+```bash
+scripts/run-board-pipeline-matrix.sh config/perf/pipeline-matrix.conf
+```
+
+脚本会自动生成 Markdown 报告：
+
+```text
+build/board-native-debug-package/data/dev/perf/pipeline-matrix-report.md
+```
+
 ## 当前缺口
 
 当前还缺少以下测试能力：
