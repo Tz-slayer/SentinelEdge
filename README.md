@@ -25,7 +25,8 @@
 图像预处理已经抽象为策略接口，当前可选 `opencv` 和 `dvpp`，其中 `opencv` 已实现软解码、缩放和 NCHW FP32 张量打包，`dvpp` 仍是待实现占位策略。
 模型后处理已经抽象为策略接口，当前 `opencv` 后端支持 YOLO FP32 输出解析、置信度过滤和 OpenCV DNN NMS；`dvpp` 后处理仍是明确的未实现占位。
 摄像头配置已经预留运行期缓冲区模式开关：`buffer_mode: "copy"` 表示稳定的复制模式，`buffer_mode: "loaned"` 预留给后续 V4L2 零拷贝租借缓冲区模式。
-图像处理能力已经统一抽象为 `ImageBackend`，当前 `opencv` 后端支持解码、缩放、张量打包和检测框绘制，`debug_image` 输出通道可以在开发板上保存带框 JPEG，用于 RTSP 推流前验证检测结果是否可视化正确。
+图像处理能力已经统一抽象为 `ImageBackend`，当前 `opencv` 后端支持解码、缩放、张量打包和检测框绘制，`debug_image` 输出通道可以在开发板上保存带框 JPEG，用于验证检测结果是否可视化正确。
+视频输出已经抽象为 `VideoSink`，当前支持 `none`、`debug_image` 和 `rtsp`。`rtsp` 第一版通过 Linux `pipe/fork/exec/write` 启动 ffmpeg，把带框 BGR24 原始帧送入 ffmpeg，由 ffmpeg 负责 H.264 编码和 RTSP listen 输出。
 
 ## 构建要求
 
@@ -33,6 +34,7 @@
 - 若使用 `CMakePresets.json`，建议 CMake 3.21+
 - 支持 C++17 的编译器
 - 使用 `preprocess.backend: "opencv"` 时，需要安装 OpenCV 开发库，至少包含 `core`、`imgproc`、`imgcodecs` 组件
+- 使用 `output.video_sink: "rtsp"` 时，需要开发板运行环境安装 `ffmpeg`
 
 ## 构建与测试
 
@@ -171,7 +173,7 @@ postprocess:
 如果开发板日志中 `after_threshold=0`，但 raw output 预览值明显不为空，优先检查
 `output_layout`、`num_classes` 和置信度阈值是否与实际模型一致。
 
-调试图输出在 `config/*/sentinel.yaml` 中配置：
+视频结果输出在 `config/*/sentinel.yaml` 中配置：
 
 ```yaml
 overlay:
@@ -179,12 +181,17 @@ overlay:
   backend: "opencv"          # opencv / dvpp
 
 output:
-  video_sink: "debug_image"  # none / debug_image
+  video_sink: "rtsp"         # none / debug_image / rtsp
   debug_image_dir: "debug/frames"
   debug_image_interval: 1
+  rtsp_url: "rtsp://0.0.0.0:8554/sentinel"
+  rtsp_fps: 10
+  rtsp_encoder: "libx264"
+  rtsp_write_timeout_ms: 1000
+  ffmpeg_path: "ffmpeg"
 ```
 
-`config/dev` 默认启用 `debug_image`，运行后会把带框 JPEG 写到：
+如果把 `video_sink` 改成 `debug_image`，运行后会把带框 JPEG 写到：
 
 ```text
 ./data/dev/debug/frames/
@@ -196,7 +203,13 @@ output:
 frame-<camera_id>-<frame_sequence>.jpg
 ```
 
-这一步用于确认“摄像头原始帧 -> 预处理 -> AscendCL 推理 -> YOLO 后处理 -> 本地画框”的闭环。`config/prod` 默认使用 `output.video_sink: "none"`，避免生产阶段持续写磁盘。后续接 RTSP 时，会新增视频输出通道，而不是把 RTSP 逻辑塞进推理或后处理模块。
+`config/dev` 和 `config/prod` 当前默认启用 `rtsp`。在开发板运行后，可以用同网段电脑上的 VLC 或 ffplay 访问：
+
+```text
+rtsp://<开发板IP>:8554/sentinel
+```
+
+第一版 RTSP 使用 ffmpeg 的 listen 模式。如果启动后没有客户端连接，或者客户端/网络消费速度过慢，写入 ffmpeg 的管道可能超时，程序会输出 `rtsp_write_timeout_ms` 相关错误。调试时建议先打开播放器，再启动 `video_sentinel`。
 
 本机交叉编译部署构建：
 
@@ -536,11 +549,21 @@ cmake --build build
 - `overlay.backend`
   检测框绘制使用的图像后端，当前支持 `opencv` 和预留的 `dvpp`
 - `output.video_sink`
-  视频结果输出通道，当前支持 `none` 和 `debug_image`
+  视频结果输出通道，当前支持 `none`、`debug_image` 和 `rtsp`
 - `output.debug_image_dir`
   `debug_image` 输出目录，相对于 `runtime.data_dir`
 - `output.debug_image_interval`
   `debug_image` 每隔多少帧保存一张图
+- `output.rtsp_url`
+  RTSP listen 地址，例如 `rtsp://0.0.0.0:8554/sentinel`
+- `output.rtsp_fps`
+  写给 ffmpeg 的输入帧率
+- `output.rtsp_encoder`
+  ffmpeg 使用的视频编码器，默认 `libx264`
+- `output.rtsp_write_timeout_ms`
+  写入 ffmpeg 标准输入的超时时间，防止 RTSP 客户端阻塞拖死推理主循环
+- `output.ffmpeg_path`
+  ffmpeg 可执行文件路径或命令名
 
 例如：
 
@@ -573,3 +596,4 @@ cmake --build build
 - [项目背景](docs/project-background.md)
 - [项目结构](docs/project-structure.md)
 - [图像处理后端设计](docs/image-processing-backend.md)
+- [RTSP 输出设计](docs/rtsp-output.md)

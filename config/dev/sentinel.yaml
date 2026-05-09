@@ -35,9 +35,14 @@ overlay:
   backend: "opencv"
 
 output:
-  video_sink: "debug_image"
+  video_sink: "rtsp"
   debug_image_dir: "debug/frames"
   debug_image_interval: 1
+  rtsp_url: "rtsp://0.0.0.0:8554/sentinel"
+  rtsp_fps: 10
+  rtsp_encoder: "libx264"
+  rtsp_write_timeout_ms: 1000
+  ffmpeg_path: "ffmpeg"
 
 runtime:
   data_dir: "./data/dev"

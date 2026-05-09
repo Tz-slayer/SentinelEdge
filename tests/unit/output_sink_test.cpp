@@ -48,7 +48,7 @@ sentinel::Frame make_jpeg_frame()
 } // namespace
 
 /**
- * @brief 验证空输出和调试图输出通道。
+ * @brief 验证空输出、调试图输出和 RTSP 输出通道工厂。
  * @return 成功返回 `0`，失败返回非零值。
  */
 int main()
@@ -90,6 +90,22 @@ int main()
     expect(std::filesystem::exists(output_path), "debug image sink should create jpeg file");
 
     debug_sink->close();
+
+    sentinel::OutputConfig rtsp_output;
+    rtsp_output.video_sink = "rtsp";
+    rtsp_output.rtsp_url = "rtsp://0.0.0.0:8554/unit-test";
+    rtsp_output.rtsp_fps = 10;
+    rtsp_output.rtsp_encoder = "libx264";
+    rtsp_output.rtsp_write_timeout_ms = 1000;
+    rtsp_output.ffmpeg_path = "ffmpeg";
+    auto rtsp_sink = sentinel::create_video_sink(rtsp_output, overlay, service);
+    expect(rtsp_sink->kind() == "rtsp", "factory should create RTSP video sink");
+
+    rtsp_output.ffmpeg_path = "/definitely-not-existing-ffmpeg";
+    auto missing_ffmpeg_sink = sentinel::create_video_sink(rtsp_output, overlay, service);
+    expect(!missing_ffmpeg_sink->open(), "RTSP sink should reject missing ffmpeg executable");
+    expect(!missing_ffmpeg_sink->last_error().empty(), "RTSP sink should expose ffmpeg error");
+
     std::filesystem::remove_all(service.data_dir);
     return 0;
 }

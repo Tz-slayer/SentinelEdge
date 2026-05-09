@@ -138,6 +138,7 @@ set(SENTINEL_CORE_SOURCES
     src/logging/stderr_logger.cpp
     src/logging/syslog_logger.cpp
     src/output/null_video_sink.cpp
+    src/output/rtsp_video_sink.cpp
     src/output/video_sink_factory.cpp
     src/postprocess/dvpp_yolo_postprocessor.cpp
     src/postprocess/postprocessor_factory.cpp

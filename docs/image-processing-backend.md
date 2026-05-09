@@ -98,9 +98,8 @@ OpenCvFramePreprocessor
 
 ## 与画框的关系
 
-画框不应该直接写死在 RTSP 推流或 Web 模块中。当前第一版通过
-`DebugImageSink` 组合 `ImageBackend`，先把带框 JPEG 保存到本地，验证坐标、类别和
-置信度正确后，再推进 RTSP 推流：
+画框不应该直接写死在 RTSP 推流或 Web 模块中。当前通过 `VideoSink` 组合
+`ImageBackend`，让调试图输出和 RTSP 输出都复用同一套解码与画框能力：
 
 ```text
 Frame + Detection[]
@@ -120,10 +119,17 @@ output.video_sink: "debug_image"
   -> ImageBackend::decode
   -> ImageBackend::draw_detections
   -> 保存 JPEG 到 runtime.data_dir / output.debug_image_dir
+
+output.video_sink: "rtsp"
+  -> RtspVideoSink
+  -> ImageBackend::decode
+  -> ImageBackend::draw_detections
+  -> 写入 ffmpeg stdin
+  -> RTSP 输出
 ```
 
-生产配置默认仍使用 `output.video_sink: "none"`，避免现场运行时持续写磁盘。开发配置
-默认使用 `debug_image`，便于在开发板上直接查看每一帧的画框结果。
+开发配置和生产配置当前默认使用 `rtsp`，便于直接验证带框实时预览。需要定位画框问题时，
+可以临时切回 `debug_image` 保存 JPEG。
 
 ## 配置建议
 
@@ -138,9 +144,14 @@ overlay:
   backend: "opencv"
 
 output:
-  video_sink: "debug_image"      # none / debug_image
+  video_sink: "rtsp"             # none / debug_image / rtsp
   debug_image_dir: "debug/frames"
   debug_image_interval: 1
+  rtsp_url: "rtsp://0.0.0.0:8554/sentinel"
+  rtsp_fps: 10
+  rtsp_encoder: "libx264"
+  rtsp_write_timeout_ms: 1000
+  ffmpeg_path: "ffmpeg"
 ```
 
 这样后续可以按阶段分别对比：
@@ -167,5 +178,6 @@ image:
 2. 使用 `OpenCvImageBackend::draw_detections` 实现 OpenCV 画框。
 3. 使用 `DebugImageSink` 保存带框 JPEG，验证坐标正确性。
 4. 在开发板上用真实摄像头和 `.om` 模型确认调试图、日志和后处理结果一致。
-5. 接入 RTSP 推流输出，把带框视频作为实时预览流暴露给 Web 页面。
-6. 最后实现 `DvppImageBackend` 的硬件解码、缩放、张量准备或 OSD 能力。
+5. 接入 RTSP 推流输出，把带框视频作为实时预览流暴露给播放器或 Web 转码网关。
+6. 增加 Web 可直接播放的 HLS、WebRTC 或 RTSP-to-Web 网关。
+7. 最后实现 `DvppImageBackend` 的硬件解码、缩放、张量准备或 OSD 能力。
