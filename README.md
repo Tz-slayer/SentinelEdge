@@ -631,7 +631,7 @@ cmake --build build
   在开发板本机执行 Debug 构建并安装到 `build/board-native-debug-package`
 - `scripts/run-board-mjpeg-preview.sh`
   临时启用 MJPEG 预览并运行 `video_sentinel`
-- `scripts/run-board-perf-matrix.sh`
-  依次运行流水线后端和输出通道性能对照，并生成日志和 CSV；可用 `BACKENDS="opencv dvpp"` 控制
+- `scripts/run-board-pipeline-perf.sh`
+  只运行当前配置中的一条 pipeline，并生成一份性能日志和一份 CSV
 - `scripts/run-board-dvpp-probe.sh`
   在开发板上运行 `sentinel_dvpp_probe`，验证 DVPP runtime 和可选 JPEG 预处理

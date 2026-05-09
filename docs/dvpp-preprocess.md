@@ -150,17 +150,35 @@ bin/sentinel_dvpp_probe
 scripts/run-board-dvpp-probe.sh build/board-native-debug-package /path/to/frame.jpg
 ```
 
-## 性能对照
+## 性能测试
 
-`scripts/run-board-perf-matrix.sh` 支持 `BACKENDS` 环境变量：
+当前阶段先只测试一条 pipeline，避免把 backend、输出通道和配置变更混在一起：
 
 ```bash
-BACKENDS="opencv dvpp" SINKS="none" FRAMES=300 \
-  scripts/run-board-perf-matrix.sh build/board-native-debug-package config/dev
+scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
 ```
 
-建议先用 `SINKS="none"` 对比纯 pipeline 成本，再加入 `debug_image` 或 `mjpeg` 观察输出
-链路额外开销。重点看 CSV 中的：
+脚本会临时修改安装包中的 `sentinel.yaml`，强制开启 `performance.enabled`，设置
+`pipeline.max_frames` 和 `performance.csv_path`，运行结束后自动恢复原配置。默认输出：
+
+- 日志：`build/board-native-debug-package/data/dev/perf/pipeline.log`
+- CSV：`build/board-native-debug-package/data/dev/perf/pipeline.csv`
+
+常用参数只保留这几个：
+
+```bash
+FRAMES=500 INTERVAL=50 \
+  scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
+```
+
+如果确实需要临时覆盖当前配置，也只跑一条 pipeline：
+
+```bash
+BACKEND=dvpp SINK=none FRAMES=300 \
+  scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
+```
+
+重点看 CSV 中的：
 
 - `preprocess_ms`
 - `detect_ms`

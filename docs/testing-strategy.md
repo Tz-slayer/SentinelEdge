@@ -156,42 +156,24 @@ min_ms
 fps
 ```
 
-后续需要对比的实验组：
-
-- `output.video_sink: none`
-- `output.video_sink: debug_image`
-- `output.video_sink: mjpeg`
-- `pipeline.backend: opencv`
-- `pipeline.backend: dvpp`
-- `camera.buffer_mode: copy`
-- `camera.buffer_mode: loaned`
-- 不同模型输入尺寸，例如 640、512、320。
-
-none
-  作为基线，表示不输出画面
-
-debug_image - none
-  约等于本地保存调试图带来的开销
-
-mjpeg - none
-  约等于网页预览带来的开销
-
-mjpeg - debug_image
-  可以对比网络发送和磁盘写入哪个更重
-
-
-测试时必须固定摄像头分辨率、fps、模型、阈值和画面场景，否则性能数据不可比较。
+当前阶段只测试一条 pipeline，不再默认做 backend/output 矩阵。测试时必须固定摄像头
+分辨率、fps、模型、阈值、输出通道和画面场景，否则性能数据不可比较。
 
 常用脚本：
 
 ```bash
 scripts/board-native-build.sh
-scripts/run-board-perf-matrix.sh build/board-native-debug-package config/dev
+scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
 scripts/run-board-mjpeg-preview.sh build/board-native-debug-package config/dev
 ```
 
-`run-board-perf-matrix.sh` 默认依次运行 `none`、`debug_image`、`mjpeg` 三组输出通道，
-并把日志和 CSV 写到安装包的 `data/dev/perf/` 目录。
+`run-board-pipeline-perf.sh` 只运行当前配置中的一条 pipeline，并把日志和 CSV 写到
+安装包的 `data/dev/perf/` 目录。需要临时覆盖单个配置时使用环境变量：
+
+```bash
+BACKEND=dvpp SINK=none FRAMES=300 \
+  scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
+```
 
 ## 当前缺口
 
