@@ -121,7 +121,11 @@ int main()
     config.backend = "dvpp";
     auto dvpp = sentinel::create_detection_postprocessor(config, rules);
     expect(dvpp->kind() == "dvpp", "factory should create DVPP postprocessor");
-    expect(!dvpp->open(), "DVPP postprocessor should report unimplemented status");
+    expect(dvpp->open(), "DVPP postprocessor should open");
+    const auto dvpp_detections = dvpp->process({output}, input);
+    expect(dvpp_detections.size() == 2U, "DVPP postprocessor should run pure C++ NMS");
+    expect(!dvpp->debug_info().empty(), "DVPP postprocessor should expose debug summary");
+    dvpp->close();
 
     bool unsupported_thrown = false;
     try {

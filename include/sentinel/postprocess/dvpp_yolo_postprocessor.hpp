@@ -7,10 +7,11 @@
 namespace sentinel {
 
 /**
- * @brief DVPP YOLO 后处理策略占位实现。
+ * @brief DVPP 链路使用的 YOLO 后处理策略。
  *
- * DVPP 更适合硬解码、缩放和色彩空间转换。YOLO 后处理一般是 CPU 或
- * 专用算子完成，因此当前类只提供明确的未实现边界，避免误用。
+ * DVPP 本身主要负责图像解码、缩放和格式转换。当前类提供 `dvpp`
+ * 配置入口下的 YOLO 输出解析和纯 C++ NMS，使完整 DVPP 配置链路可以
+ * 跑通；该阶段不宣称使用 DVPP 硬件执行 NMS。
  */
 class DvppYoloPostprocessor final : public DetectionPostprocessor {
 public:
@@ -22,8 +23,8 @@ public:
     DvppYoloPostprocessor(PostprocessConfig config, RuleConfig rules);
 
     /**
-     * @brief 报告 DVPP 后处理尚未实现。
-     * @return 固定返回 `false`。
+     * @brief 校验后处理配置。
+     * @return 成功返回 `true`，失败返回 `false`。
      */
     bool open() override;
 
@@ -33,10 +34,10 @@ public:
     void close() noexcept override;
 
     /**
-     * @brief 占位后处理函数。
+     * @brief 将 YOLO 原始输出转换为检测结果。
      * @param outputs 模型输出缓冲区列表。
      * @param input_tensor 本次推理输入张量。
-     * @return 固定返回空列表。
+     * @return 检测结果列表；失败时返回空列表并更新 `last_error()`。
      */
     std::vector<Detection> process(const std::vector<ModelOutputBuffer>& outputs,
                                    const TensorBuffer& input_tensor) override;
@@ -64,6 +65,7 @@ private:
     RuleConfig rules_;
     std::string last_error_;
     std::string debug_info_;
+    bool is_open_{false};
 };
 
 } // namespace sentinel

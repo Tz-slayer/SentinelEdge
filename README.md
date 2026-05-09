@@ -70,7 +70,8 @@ ctest --test-dir build --output-on-failure
 - `ENABLE_ASCENDCL`
   是否编译 AscendCL 推理后端；开发机可以关闭，部署到 Orange Pi AI Pro 时启用
 - `ENABLE_DVPP`
-  是否编译 Ascend DVPP 预处理链路；需要同时开启 `ENABLE_ASCENDCL`
+  是否编译 Ascend DVPP 图像链路；需要同时开启 `ENABLE_ASCENDCL`。当前可配置
+  `preprocess.backend`、`postprocess.backend`、`overlay.backend` 为 `dvpp`
 - `ENABLE_OPENCV_PREPROCESSOR`
   是否编译 OpenCV 图像预处理后端；使用当前 `config/dev` 和 `config/prod` 时应保持开启
 - `ENABLE_OPENCV_POSTPROCESSOR`

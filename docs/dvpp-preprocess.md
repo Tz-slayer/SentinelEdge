@@ -18,13 +18,41 @@ V4L2 MJPEG Frame
 DVPP 和 OpenCV 在同一个 pipeline 中可切换、可计时、可回退，便于确认摄像头输入、
 模型尺寸、后处理和日志都没有被一起改坏。
 
+## 全链路 DVPP 配置
+
+现在可以将三处 backend 都切到 `dvpp`：
+
+```yaml
+preprocess:
+  backend: "dvpp"
+  device_id: 0
+  output_width: 640
+  output_height: 640
+  output_layout: "NCHW"
+  output_dtype: "FP32"
+  normalize: true
+
+postprocess:
+  backend: "dvpp"
+
+overlay:
+  enabled: true
+  backend: "dvpp"
+```
+
+需要注意这里的“DVPP 全链路”含义是配置层全链路可切换为 `dvpp` 并能运行：
+
+- `preprocess.backend: "dvpp"`：使用 DVPP JPEGD 解码和 VPC 缩放。
+- `postprocess.backend: "dvpp"`：使用独立的纯 C++ YOLO 解码和 NMS。YOLO NMS 不属于 DVPP 图像硬件能力，因此不伪装成硬件加速。
+- `overlay.backend: "dvpp"`：使用 `DvppImageBackend` 解码摄像头 MJPEG 帧，随后在 Host BGR24 缓冲区绘制检测框。
+
 ## 当前限制
 
 - `preprocess.backend: "dvpp"` 当前只支持 `V4L2_PIX_FMT_MJPEG` 输入。
 - 输出固定支持 `NCHW` + `FP32`，与 OpenCV 预处理链路保持一致。
-- DVPP 只负责 JPEG 解码和缩放；NV12 到 RGB、归一化、NCHW 打包仍在 CPU 侧完成。
-- `postprocess.backend` 和 `overlay.backend` 仍建议保持 `opencv`，因为 DVPP 后处理和画框还没有实现。
-- `ImageBackend::dvpp` 仍是占位，当前真实 DVPP 代码先落在 `DvppFramePreprocessor` 中。
+- DVPP 预处理只负责 JPEG 解码和缩放；NV12 到 RGB、归一化、NCHW 打包仍在 CPU 侧完成。
+- `overlay.backend: "dvpp"` 的解码使用 DVPP，但画框当前在 Host BGR24 缓冲区上完成，不是 DVPP OSD。
+- `mjpeg` 和 `debug_image` 输出最终 JPEG 编码仍复用当前 OpenCV 输出实现。
 
 ## 配置方式
 

@@ -2,57 +2,64 @@
 
 #include "sentinel/image/image_backend.hpp"
 
+#include <memory>
 #include <string>
 
 namespace sentinel {
 
 /**
- * @brief DVPP 图像处理后端占位实现。
+ * @brief DVPP 图像处理后端。
  *
- * 该类统一承载未来 DVPP 解码、缩放、格式转换、OSD/画框等硬件能力。
- * 当前先明确返回未实现错误，避免上层误以为已经启用硬件图像处理。
+ * 当前实现使用 DVPP 完成 MJPEG 解码，返回 Host BGR24 图像给调试图和
+ * MJPEG 输出链路。缩放、张量打包和画框在 Host BGR24 缓冲区上完成，
+ * 主要用于让 `overlay.backend: dvpp` 的完整链路可运行和可对比。
  */
 class DvppImageBackend final : public ImageBackend {
 public:
     /**
-     * @brief 构造 DVPP 图像处理后端占位对象。
+     * @brief 构造 DVPP 图像处理后端对象。
      */
-    DvppImageBackend() = default;
+    DvppImageBackend();
 
     /**
-     * @brief 报告 DVPP 图像后端尚未实现。
-     * @return 固定返回 `false`。
+     * @brief 释放 DVPP 图像处理资源。
+     */
+    ~DvppImageBackend() override;
+
+    /**
+     * @brief 初始化 DVPP 图像后端。
+     * @return 成功返回 `true`，失败返回 `false`。
      */
     bool open() override;
 
     /**
-     * @brief 占位释放函数。
+     * @brief 释放 DVPP 图像后端资源。
      */
     void close() noexcept override;
 
     /**
-     * @brief 占位解码函数。
+     * @brief 使用 DVPP 将视频帧解码为 Host BGR24 图像。
      * @param frame 视频源输出的原始帧。
-     * @return 固定返回空。
+     * @return 成功返回图像；失败返回空。
      */
     std::optional<ImageBuffer> decode(const Frame& frame) override;
 
     /**
-     * @brief 占位缩放函数。
+     * @brief 缩放 Host BGR24 图像。
      * @param image 输入图像。
      * @param width 输出宽度。
      * @param height 输出高度。
-     * @return 固定返回空。
+     * @return 成功返回缩放后的图像。
      */
     std::optional<ImageBuffer> resize(const ImageBuffer& image, int width, int height) override;
 
     /**
-     * @brief 占位张量转换函数。
+     * @brief 将 Host BGR24 图像转换为模型输入张量。
      * @param image 输入图像。
      * @param config 预处理输出配置。
      * @param frame_sequence 来源帧序号。
      * @param camera_id 来源摄像头 ID。
-     * @return 固定返回空。
+     * @return 成功返回模型输入张量。
      */
     std::optional<TensorBuffer> to_tensor(const ImageBuffer& image,
                                           const PreprocessConfig& config,
@@ -60,10 +67,10 @@ public:
                                           const std::string& camera_id) override;
 
     /**
-     * @brief 占位检测框绘制函数。
+     * @brief 在 Host BGR24 图像上绘制检测框。
      * @param image 输入图像。
      * @param detections 检测结果列表。
-     * @return 固定返回空。
+     * @return 成功返回绘制后的图像。
      */
     std::optional<ImageBuffer> draw_detections(
         const ImageBuffer& image,
@@ -83,10 +90,11 @@ public:
 
 private:
     /**
-     * @brief 设置统一的未实现错误。
+     * @brief DVPP 图像处理实现细节。
      */
-    void set_unimplemented_error();
+    class Impl;
 
+    std::unique_ptr<Impl> impl_;
     std::string last_error_;
 };
 
