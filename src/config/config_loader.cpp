@@ -225,6 +225,16 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             if (!parsed_names.empty()) {
                 config.postprocess.class_names = parsed_names;
             }
+        } else if (section == "overlay" && key == "enabled") {
+            config.overlay.enabled = parse_bool(value);
+        } else if (section == "overlay" && key == "backend") {
+            config.overlay.backend = value;
+        } else if (section == "output" && key == "video_sink") {
+            config.output.video_sink = value;
+        } else if (section == "output" && key == "debug_image_dir") {
+            config.output.debug_image_dir = value;
+        } else if (section == "output" && key == "debug_image_interval") {
+            config.output.debug_image_interval = std::stoi(value);
         } else if (section == "runtime" && key == "data_dir") {
             config.service.data_dir = value;
         } else if (section == "pipeline" && key == "max_frames") {
@@ -391,6 +401,9 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     if (config.preprocess.backend.empty()) {
         throw std::runtime_error("preprocess.backend must not be empty");
     }
+    if (config.preprocess.backend != "opencv" && config.preprocess.backend != "dvpp") {
+        throw std::runtime_error("preprocess.backend must be opencv or dvpp");
+    }
     if (config.preprocess.output_width <= 0 || config.preprocess.output_height <= 0) {
         throw std::runtime_error("preprocess output size must be positive");
     }
@@ -426,6 +439,15 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     }
     if (config.postprocess.max_detections <= 0) {
         throw std::runtime_error("postprocess.max_detections must be positive");
+    }
+    if (config.overlay.backend != "opencv" && config.overlay.backend != "dvpp") {
+        throw std::runtime_error("overlay.backend must be opencv or dvpp");
+    }
+    if (config.output.video_sink != "none" && config.output.video_sink != "debug_image") {
+        throw std::runtime_error("output.video_sink must be none or debug_image");
+    }
+    if (config.output.debug_image_interval <= 0) {
+        throw std::runtime_error("output.debug_image_interval must be positive");
     }
     if (config.rules.hold_frames <= 0) {
         throw std::runtime_error("events.hold_frames must be greater than zero");

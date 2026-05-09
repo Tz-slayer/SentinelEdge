@@ -69,6 +69,26 @@ struct PostprocessConfig {
 };
 
 /**
+ * @brief 检测框叠加绘制配置。
+ */
+struct OverlayConfig {
+    bool enabled{false};
+    std::string backend{"opencv"};
+};
+
+/**
+ * @brief 视频输出通道配置。
+ *
+ * 当前支持 `none` 和 `debug_image`。`debug_image` 会把画框后的 JPEG
+ * 保存到 `ServiceConfig::data_dir / debug_image_dir`，用于 RTSP 前的坐标验证。
+ */
+struct OutputConfig {
+    std::string video_sink{"none"};
+    std::filesystem::path debug_image_dir{"debug/frames"};
+    int debug_image_interval{1};
+};
+
+/**
  * @brief 单路摄像头或视频流输入配置。
  *
  * `buffer_mode` 用于控制视频帧缓冲区的数据通路：`copy` 表示 V4L2
@@ -105,6 +125,8 @@ struct SentinelConfig {
     InferenceConfig inference;
     PreprocessConfig preprocess;
     PostprocessConfig postprocess;
+    OverlayConfig overlay;
+    OutputConfig output;
     std::vector<CameraConfig> cameras;
     RuleConfig rules;
 };
@@ -130,6 +152,21 @@ struct Frame {
     std::uint32_t pixel_format{0};
     std::int64_t timestamp_ns{0};
     std::size_t bytes_used{0};
+    std::vector<std::uint8_t> data;
+};
+
+/**
+ * @brief 解码或渲染后的图像缓冲区。
+ *
+ * 该结构用于统一 OpenCV、DVPP 等图像处理后端的中间结果。当前稳定
+ * 路径使用 Host 内存和 BGR24/RGB24 等普通像素格式；后续接入硬件
+ * 加速或零拷贝时，可在不改变上层阶段语义的前提下扩展内存类型。
+ */
+struct ImageBuffer {
+    int width{0};
+    int height{0};
+    std::string pixel_format{"BGR24"};
+    std::string memory_type{"host"};
     std::vector<std::uint8_t> data;
 };
 

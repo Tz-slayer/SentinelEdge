@@ -129,12 +129,16 @@ set(SENTINEL_CORE_SOURCES
     src/app/pipeline.cpp
     src/analytics/event_builder.cpp
     src/config/config_loader.cpp
+    src/image/dvpp_image_backend.cpp
+    src/image/image_backend_factory.cpp
     src/inference/detector_factory.cpp
     src/inference/mock_detector.cpp
     src/logging/logger.cpp
     src/logging/logger_factory.cpp
     src/logging/stderr_logger.cpp
     src/logging/syslog_logger.cpp
+    src/output/null_video_sink.cpp
+    src/output/video_sink_factory.cpp
     src/postprocess/dvpp_yolo_postprocessor.cpp
     src/postprocess/postprocessor_factory.cpp
     src/preprocess/dvpp_frame_preprocessor.cpp
@@ -156,10 +160,14 @@ endif()
 
 if(ENABLE_OPENCV_PREPROCESSOR)
     list(APPEND SENTINEL_CORE_SOURCES
+        src/image/opencv_image_backend.cpp
+        src/output/debug_image_sink.cpp
         src/preprocess/opencv_frame_preprocessor.cpp
     )
 else()
     list(APPEND SENTINEL_CORE_SOURCES
+        src/image/opencv_image_backend_stub.cpp
+        src/output/debug_image_sink_stub.cpp
         src/preprocess/opencv_frame_preprocessor_stub.cpp
     )
 endif()
@@ -392,6 +400,34 @@ if(ENABLE_TESTS)
     endif()
 
     if(ENABLE_OPENCV_PREPROCESSOR)
+        add_executable(sentinel_image_backend_tests
+            tests/unit/image_backend_test.cpp
+        )
+
+        target_link_libraries(sentinel_image_backend_tests
+            PRIVATE
+                sentinel_core
+        )
+
+        add_test(
+            NAME sentinel.image_backend
+            COMMAND sentinel_image_backend_tests
+        )
+
+        add_executable(sentinel_output_tests
+            tests/unit/output_sink_test.cpp
+        )
+
+        target_link_libraries(sentinel_output_tests
+            PRIVATE
+                sentinel_core
+        )
+
+        add_test(
+            NAME sentinel.output_sink
+            COMMAND sentinel_output_tests
+        )
+
         add_executable(sentinel_preprocessor_tests
             tests/unit/preprocessor_factory_test.cpp
         )

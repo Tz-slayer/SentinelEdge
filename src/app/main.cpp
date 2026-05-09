@@ -36,6 +36,8 @@ int main(int argc, char** argv)
         logger->info("build_profile: production");
 #endif
         logger->info("service: " + config.service.host + ":" + std::to_string(config.service.port));
+        logger->info("logging: backend=" + config.logging.backend + " level=" + config.logging.level);
+        logger->debug("debug logging enabled");
         logger->info("camera: " + config.cameras.front().id + " type=" + config.cameras.front().type);
 
         // demo 示例 pipeline

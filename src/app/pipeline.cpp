@@ -2,6 +2,7 @@
 
 #include "sentinel/analytics/event_builder.hpp"
 #include "sentinel/inference/detector_factory.hpp"
+#include "sentinel/output/video_sink_factory.hpp"
 #include "sentinel/preprocess/preprocessor_factory.hpp"
 #include "sentinel/video/video_source_factory.hpp"
 
@@ -248,6 +249,27 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
         throw std::runtime_error(error_message);
     }
 
+    auto video_sink = create_video_sink(config.output, config.overlay, config.service);
+    logger.info("open video sink type=" + std::string(video_sink->kind()) +
+                " overlay=" + (config.overlay.enabled ? "enabled" : "disabled") +
+                " overlay_backend=" + config.overlay.backend);
+    if (config.output.video_sink == "debug_image") {
+        const auto debug_output_dir = config.service.data_dir / config.output.debug_image_dir;
+        logger.info("debug image output_dir=" + debug_output_dir.string() +
+                    " interval=" + std::to_string(config.output.debug_image_interval));
+    }
+    if (!video_sink->open()) {
+        const auto error_message = "unable to open " + std::string(video_sink->kind()) +
+                                   " video sink: " + std::string(video_sink->last_error());
+        logger.error(error_message);
+        detector->close();
+        if (preprocessor) {
+            preprocessor->close();
+        }
+        video_source.close();
+        throw std::runtime_error(error_message);
+    }
+
     EventBuilder event_builder(config.rules);
 
     PipelineResult result;
@@ -294,6 +316,12 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
         if (!detector->debug_info().empty()) {
             logger.debug("detector result: " + std::string(detector->debug_info()));
         }
+
+        if (!video_sink->write(*frame, detections)) {
+            logger.error("video sink failed: " + std::string(video_sink->last_error()));
+            break;
+        }
+
         result.frames_processed += 1;
         result.detections_seen += static_cast<int>(detections.size());
 
@@ -301,6 +329,7 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
         result.events.insert(result.events.end(), events.begin(), events.end());
     }
 
+    video_sink->close();
     detector->close();
     if (preprocessor) {
         preprocessor->close();

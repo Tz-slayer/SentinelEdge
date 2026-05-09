@@ -30,6 +30,15 @@ postprocess:
   max_detections: 100
   merge_coco_vehicles: true
 
+overlay:
+  enabled: true
+  backend: "opencv"
+
+output:
+  video_sink: "debug_image"
+  debug_image_dir: "debug/frames"
+  debug_image_interval: 1
+
 runtime:
   data_dir: "./data"
 

@@ -25,6 +25,7 @@
 图像预处理已经抽象为策略接口，当前可选 `opencv` 和 `dvpp`，其中 `opencv` 已实现软解码、缩放和 NCHW FP32 张量打包，`dvpp` 仍是待实现占位策略。
 模型后处理已经抽象为策略接口，当前 `opencv` 后端支持 YOLO FP32 输出解析、置信度过滤和 OpenCV DNN NMS；`dvpp` 后处理仍是明确的未实现占位。
 摄像头配置已经预留运行期缓冲区模式开关：`buffer_mode: "copy"` 表示稳定的复制模式，`buffer_mode: "loaned"` 预留给后续 V4L2 零拷贝租借缓冲区模式。
+图像处理能力已经统一抽象为 `ImageBackend`，当前 `opencv` 后端支持解码、缩放、张量打包和检测框绘制，`debug_image` 输出通道可以在开发板上保存带框 JPEG，用于 RTSP 推流前验证检测结果是否可视化正确。
 
 ## 构建要求
 
@@ -169,6 +170,33 @@ postprocess:
 
 如果开发板日志中 `after_threshold=0`，但 raw output 预览值明显不为空，优先检查
 `output_layout`、`num_classes` 和置信度阈值是否与实际模型一致。
+
+调试图输出在 `config/*/sentinel.yaml` 中配置：
+
+```yaml
+overlay:
+  enabled: true
+  backend: "opencv"          # opencv / dvpp
+
+output:
+  video_sink: "debug_image"  # none / debug_image
+  debug_image_dir: "debug/frames"
+  debug_image_interval: 1
+```
+
+`config/dev` 默认启用 `debug_image`，运行后会把带框 JPEG 写到：
+
+```text
+./data/dev/debug/frames/
+```
+
+文件名格式为：
+
+```text
+frame-<camera_id>-<frame_sequence>.jpg
+```
+
+这一步用于确认“摄像头原始帧 -> 预处理 -> AscendCL 推理 -> YOLO 后处理 -> 本地画框”的闭环。`config/prod` 默认使用 `output.video_sink: "none"`，避免生产阶段持续写磁盘。后续接 RTSP 时，会新增视频输出通道，而不是把 RTSP 逻辑塞进推理或后处理模块。
 
 本机交叉编译部署构建：
 
@@ -499,6 +527,20 @@ cmake --build build
   `.om` 模型路径，AscendCL 后端会加载该文件
 - `inference.device_id`
   AscendCL 设备编号，单设备通常为 `0`
+- `preprocess.backend`
+  图像预处理后端，当前支持 `opencv` 和预留的 `dvpp`
+- `postprocess.backend`
+  YOLO 后处理后端，当前支持 `opencv` 和预留的 `dvpp`
+- `overlay.enabled`
+  是否在输出图像上绘制检测框
+- `overlay.backend`
+  检测框绘制使用的图像后端，当前支持 `opencv` 和预留的 `dvpp`
+- `output.video_sink`
+  视频结果输出通道，当前支持 `none` 和 `debug_image`
+- `output.debug_image_dir`
+  `debug_image` 输出目录，相对于 `runtime.data_dir`
+- `output.debug_image_interval`
+  `debug_image` 每隔多少帧保存一张图
 
 例如：
 
@@ -530,3 +572,4 @@ cmake --build build
 
 - [项目背景](docs/project-background.md)
 - [项目结构](docs/project-structure.md)
+- [图像处理后端设计](docs/image-processing-backend.md)

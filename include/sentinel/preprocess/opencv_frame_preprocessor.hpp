@@ -1,7 +1,9 @@
 #pragma once
 
+#include "sentinel/image/image_backend.hpp"
 #include "sentinel/preprocess/frame_preprocessor.hpp"
 
+#include <memory>
 #include <string>
 
 namespace sentinel {
@@ -53,6 +55,7 @@ public:
 
 private:
     PreprocessConfig config_;
+    std::unique_ptr<ImageBackend> image_backend_;
     std::string last_error_;
     bool is_open_{false};
 };
