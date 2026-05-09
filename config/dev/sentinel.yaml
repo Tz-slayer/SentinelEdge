@@ -13,8 +13,6 @@ inference:
   device_id: 0
 
 preprocess:
-  backend: "opencv"
-  device_id: 0
   output_width: 640
   output_height: 640
   output_layout: "NCHW"
@@ -22,7 +20,6 @@ preprocess:
   normalize: true
 
 postprocess:
-  backend: "opencv"
   model_type: "yolo"
   output_layout: "channels_first"
   num_classes: 80
@@ -33,7 +30,6 @@ postprocess:
 
 overlay:
   enabled: true
-  backend: "opencv"
 
 output:
   video_sink: "mjpeg"
@@ -54,4 +50,5 @@ runtime:
   data_dir: "./data/dev"
 
 pipeline:
+  backend: "opencv"
   max_frames: 300

@@ -6,7 +6,7 @@ CONFIG_DIR="${2:-config/dev}"
 FRAMES="${FRAMES:-300}"
 INTERVAL="${INTERVAL:-30}"
 SINKS="${SINKS:-none debug_image mjpeg}"
-PREPROCESSORS="${PREPROCESSORS:-opencv}"
+BACKENDS="${BACKENDS:-opencv}"
 
 CONFIG_FILE="${PACKAGE_DIR}/${CONFIG_DIR}/sentinel.yaml"
 BACKUP_FILE="${CONFIG_FILE}.perf-matrix.bak"
@@ -29,12 +29,12 @@ restore_config() {
 }
 trap restore_config EXIT
 
-for preprocessor in ${PREPROCESSORS}; do
-    case "${preprocessor}" in
+for backend in ${BACKENDS}; do
+    case "${backend}" in
         opencv|dvpp)
             ;;
         *)
-            printf 'unsupported preprocessor in PREPROCESSORS: %s\n' "${preprocessor}" >&2
+            printf 'unsupported pipeline backend in BACKENDS: %s\n' "${backend}" >&2
             exit 1
             ;;
     esac
@@ -49,10 +49,10 @@ for preprocessor in ${PREPROCESSORS}; do
                 ;;
         esac
 
-        csv_path="perf/pipeline-${preprocessor}-${sink}.csv"
-        log_path="${PERF_DIR}/run-${preprocessor}-${sink}.log"
+        csv_path="perf/pipeline-${backend}-${sink}.csv"
+        log_path="${PERF_DIR}/run-${backend}-${sink}.log"
 
-        perl -0pi -e "s/(preprocess:\\n\\s+backend: )\"(?:opencv|dvpp)\"/\${1}\"${preprocessor}\"/" \
+        perl -0pi -e "s/(pipeline:\\n\\s+backend: )\"(?:opencv|dvpp)\"/\${1}\"${backend}\"/" \
             "${CONFIG_FILE}"
 
         sed -i \
@@ -62,8 +62,8 @@ for preprocessor in ${PREPROCESSORS}; do
             -e "s/^  max_frames:.*/  max_frames: ${FRAMES}/" \
             "${CONFIG_FILE}"
 
-        printf 'running preprocessor=%s sink=%s frames=%s interval=%s\n' \
-            "${preprocessor}" "${sink}" "${FRAMES}" "${INTERVAL}"
+        printf 'running backend=%s sink=%s frames=%s interval=%s\n' \
+            "${backend}" "${sink}" "${FRAMES}" "${INTERVAL}"
         (
             cd "${PACKAGE_DIR}"
             ./bin/video_sentinel "${CONFIG_DIR}"

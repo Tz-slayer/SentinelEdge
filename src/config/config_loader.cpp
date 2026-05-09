@@ -255,8 +255,10 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             config.performance.csv_path = value;
         } else if (section == "runtime" && key == "data_dir") {
             config.service.data_dir = value;
+        } else if (section == "pipeline" && key == "backend") {
+            config.pipeline.backend = value;
         } else if (section == "pipeline" && key == "max_frames") {
-            config.service.max_frames = std::stoi(value);
+            config.pipeline.max_frames = std::stoi(value);
         }
     }
 }
@@ -373,6 +375,34 @@ void load_rule_config(const std::filesystem::path& config_dir, SentinelConfig& c
     }
 }
 
+/**
+ * @brief 根据流水线后端选择派生各阶段策略后端。
+ * @param config 待更新的聚合配置对象。
+ *
+ * 该函数是用户配置和内部策略对象之间的边界。用户只需要选择
+ * `pipeline.backend`，这里再统一设置预处理、后处理和画框后端，避免
+ * 配置文件暴露过多阶段细节。DVPP 路径复用推理设备号，保证 AscendCL
+ * 推理和 DVPP 预处理运行在同一张设备上。
+ * @return 无返回值。
+ */
+void apply_pipeline_backend(SentinelConfig& config)
+{
+    if (config.pipeline.backend == "opencv") {
+        config.preprocess.backend = "opencv";
+        config.postprocess.backend = "opencv";
+        config.overlay.backend = "opencv";
+        return;
+    }
+
+    if (config.pipeline.backend == "dvpp") {
+        config.preprocess.backend = "dvpp";
+        config.preprocess.device_id = config.inference.device_id;
+        config.postprocess.backend = "dvpp";
+        config.overlay.backend = "dvpp";
+        return;
+    }
+}
+
 } // namespace
 
 /**
@@ -386,6 +416,7 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     load_service_config(config_dir, config);
     load_camera_config(config_dir, config);
     load_rule_config(config_dir, config);
+    apply_pipeline_backend(config);
 
     // 先做最基本的运行前校验，避免后续流水线在空配置上继续运行。
     if (config.cameras.empty()) {
@@ -398,7 +429,10 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
                                      camera.id);
         }
     }
-    if (config.service.max_frames <= 0) {
+    if (config.pipeline.backend != "opencv" && config.pipeline.backend != "dvpp") {
+        throw std::runtime_error("pipeline.backend must be opencv or dvpp");
+    }
+    if (config.pipeline.max_frames <= 0) {
         throw std::runtime_error("pipeline.max_frames must be greater than zero");
     }
     if (config.logging.backend.empty()) {

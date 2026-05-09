@@ -14,7 +14,6 @@ struct ServiceConfig {
     std::string host{"127.0.0.1"};
     int port{8080};
     std::filesystem::path data_dir{"./data"};
-    int max_frames{5};
 };
 
 /**
@@ -108,6 +107,19 @@ struct PerformanceConfig {
 };
 
 /**
+ * @brief 流水线级运行配置。
+ *
+ * `backend` 是用户可见的图像处理后端选择。配置加载阶段会把它映射到
+ * 预处理、后处理和画框策略：`opencv` 表示全链路使用 CPU/OpenCV 路径，
+ * `dvpp` 表示在 DVPP 能加速的图像处理环节优先使用 DVPP，非图像硬件能力
+ * 仍由 CPU 侧代码完成。
+ */
+struct PipelineConfig {
+    std::string backend{"opencv"};
+    int max_frames{5};
+};
+
+/**
  * @brief 单路摄像头或视频流输入配置。
  *
  * `buffer_mode` 用于控制视频帧缓冲区的数据通路：`copy` 表示 V4L2
@@ -147,6 +159,7 @@ struct SentinelConfig {
     OverlayConfig overlay;
     OutputConfig output;
     PerformanceConfig performance;
+    PipelineConfig pipeline;
     std::vector<CameraConfig> cameras;
     RuleConfig rules;
 };

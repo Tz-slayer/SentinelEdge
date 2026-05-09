@@ -20,38 +20,36 @@ DVPP 和 OpenCV 在同一个 pipeline 中可切换、可计时、可回退，便
 
 ## 全链路 DVPP 配置
 
-现在可以将三处 backend 都切到 `dvpp`：
+现在只需要将 `pipeline.backend` 切到 `dvpp`：
 
 ```yaml
-preprocess:
+pipeline:
   backend: "dvpp"
-  device_id: 0
+  max_frames: 300
+
+preprocess:
   output_width: 640
   output_height: 640
   output_layout: "NCHW"
   output_dtype: "FP32"
   normalize: true
 
-postprocess:
-  backend: "dvpp"
-
 overlay:
   enabled: true
-  backend: "dvpp"
 ```
 
-需要注意这里的“DVPP 全链路”含义是配置层全链路可切换为 `dvpp` 并能运行：
+配置加载器会把 `pipeline.backend: "dvpp"` 统一映射到预处理、后处理和画框策略。需要注意这里的“DVPP 全链路”含义是：DVPP 能加速的图像处理环节优先走 DVPP，其他环节仍使用 CPU 侧实现：
 
-- `preprocess.backend: "dvpp"`：使用 DVPP JPEGD 解码和 VPC 缩放。
-- `postprocess.backend: "dvpp"`：使用独立的纯 C++ YOLO 解码和 NMS。YOLO NMS 不属于 DVPP 图像硬件能力，因此不伪装成硬件加速。
-- `overlay.backend: "dvpp"`：使用 `DvppImageBackend` 解码摄像头 MJPEG 帧，随后在 Host BGR24 缓冲区绘制检测框。
+- 预处理：使用 DVPP JPEGD 解码和 VPC 缩放。
+- 后处理：使用独立的纯 C++ YOLO 解码和 NMS。YOLO NMS 不属于 DVPP 图像硬件能力，因此不伪装成硬件加速。
+- 画框输出：使用 `DvppImageBackend` 解码摄像头 MJPEG 帧，随后在 Host BGR24 缓冲区绘制检测框。
 
 ## 当前限制
 
-- `preprocess.backend: "dvpp"` 当前只支持 `V4L2_PIX_FMT_MJPEG` 输入。
+- `pipeline.backend: "dvpp"` 当前要求摄像头输入为 `V4L2_PIX_FMT_MJPEG`，因为 DVPP 预处理路径使用 JPEGD 解码。
 - 输出固定支持 `NCHW` + `FP32`，与 OpenCV 预处理链路保持一致。
 - DVPP 预处理只负责 JPEG 解码和缩放；NV12 到 RGB、归一化、NCHW 打包仍在 CPU 侧完成。
-- `overlay.backend: "dvpp"` 的解码使用 DVPP，但画框当前在 Host BGR24 缓冲区上完成，不是 DVPP OSD。
+- DVPP 画框链路的解码使用 DVPP，但画框当前在 Host BGR24 缓冲区上完成，不是 DVPP OSD。
 - `mjpeg` 和 `debug_image` 输出最终 JPEG 编码仍复用当前 OpenCV 输出实现。
 
 ## 配置方式
@@ -64,12 +62,17 @@ cmake --build --preset board-native-debug -j"$(nproc)"
 cmake --install build/board-native-debug
 ```
 
-切换预处理后端：
+切换流水线后端：
+
+```yaml
+pipeline:
+  backend: "dvpp"
+```
+
+模型输入尺寸仍在 `preprocess` 中配置：
 
 ```yaml
 preprocess:
-  backend: "dvpp"
-  device_id: 0
   output_width: 640
   output_height: 640
   output_layout: "NCHW"
@@ -77,8 +80,8 @@ preprocess:
   normalize: true
 ```
 
-`device_id` 应与 `inference.device_id` 保持一致。代码中通过共享 `AclRuntimeSession`
-避免 DVPP 预处理和 AscendCL detector 重复初始化/释放 ACL runtime。
+DVPP 设备号会跟随 `inference.device_id`。代码中通过共享 `AclRuntimeSession`
+避免 DVPP 图像处理和 AscendCL detector 重复初始化/释放 ACL runtime。
 
 ## 探针工具
 
@@ -108,10 +111,10 @@ scripts/run-board-dvpp-probe.sh build/board-native-debug-package /path/to/frame.
 
 ## 性能对照
 
-`scripts/run-board-perf-matrix.sh` 支持 `PREPROCESSORS` 环境变量：
+`scripts/run-board-perf-matrix.sh` 支持 `BACKENDS` 环境变量：
 
 ```bash
-PREPROCESSORS="opencv dvpp" SINKS="none" FRAMES=300 \
+BACKENDS="opencv dvpp" SINKS="none" FRAMES=300 \
   scripts/run-board-perf-matrix.sh build/board-native-debug-package config/dev
 ```
 
@@ -126,6 +129,6 @@ PREPROCESSORS="opencv dvpp" SINKS="none" FRAMES=300 \
 ## 后续演进
 
 1. 先在开发板确认 `sentinel_dvpp_probe --jpeg` 能输出正确 Tensor 尺寸。
-2. 再将 `config/dev/sentinel.yaml` 的 `preprocess.backend` 切到 `dvpp` 跑完整 pipeline。
+2. 再将 `config/dev/sentinel.yaml` 的 `pipeline.backend` 切到 `dvpp` 跑完整 pipeline。
 3. 如果 DVPP 解码缩放稳定，再设计 Device Tensor 交接，减少 Host 拷回和 CPU 打包。
 4. 最后再考虑 DVPP OSD/画框或 MediaMTX 推流，不和本阶段混在一起。

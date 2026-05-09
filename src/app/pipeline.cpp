@@ -358,7 +358,7 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
 
     PipelineResult result;
 
-    for (int frame_index = 0; frame_index < config.service.max_frames; ++frame_index) {
+    for (int frame_index = 0; frame_index < config.pipeline.max_frames; ++frame_index) {
         const auto frame_start = Clock::now();
 
         // 停止回调放在每轮开头，确保主循环能尽快响应 SIGINT/SIGTERM。

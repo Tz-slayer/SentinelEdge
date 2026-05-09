@@ -161,8 +161,8 @@ fps
 - `output.video_sink: none`
 - `output.video_sink: debug_image`
 - `output.video_sink: mjpeg`
-- `preprocess.backend: opencv`
-- `preprocess.backend: dvpp`
+- `pipeline.backend: opencv`
+- `pipeline.backend: dvpp`
 - `camera.buffer_mode: copy`
 - `camera.buffer_mode: loaned`
 - 不同模型输入尺寸，例如 640、512、320。

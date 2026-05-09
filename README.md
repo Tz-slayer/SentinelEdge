@@ -22,8 +22,8 @@
 - `data/`：本地运行数据目录
 
 当前 C++ 程序已经接入 V4L2 摄像头、AscendCL 推理后端骨架、日志策略和部署包生成流程。mock 输入只保留给本机单元测试夹具，开发板调试配置不再使用 mock。
-图像预处理已经抽象为策略接口，当前可选 `opencv` 和 `dvpp`，其中 `opencv` 已实现软解码、缩放和 NCHW FP32 张量打包，`dvpp` 仍是待实现占位策略。
-模型后处理已经抽象为策略接口，当前 `opencv` 后端支持 YOLO FP32 输出解析、置信度过滤和 OpenCV DNN NMS；`dvpp` 后处理仍是明确的未实现占位。
+图像预处理已经抽象为策略接口，用户通过 `pipeline.backend` 在 `opencv` 和 `dvpp` 之间切换。`opencv` 使用 CPU/OpenCV 完成解码、缩放和 NCHW FP32 张量打包；`dvpp` 在 JPEG 解码、缩放等 DVPP 能力范围内优先使用硬件加速，非 DVPP 能力仍由 CPU 侧代码完成。
+模型后处理已经抽象为策略接口，当前支持 YOLO FP32 输出解析、置信度过滤和 NMS；`dvpp` 配置路径下的 YOLO NMS 仍是 CPU 侧纯 C++ 实现，不伪装为 DVPP 硬件能力。
 摄像头配置已经预留运行期缓冲区模式开关：`buffer_mode: "copy"` 表示稳定的复制模式，`buffer_mode: "loaned"` 预留给后续 V4L2 零拷贝租借缓冲区模式。
 图像处理能力已经统一抽象为 `ImageBackend`，当前 `opencv` 后端支持解码、缩放、张量打包和检测框绘制，`debug_image` 输出通道可以在开发板上保存带框 JPEG，用于验证检测结果是否可视化正确。
 视频输出已经抽象为 `VideoSink`，当前支持 `none`、`debug_image` 和 `mjpeg`。`mjpeg` 使用 Linux socket 启动本地 HTTP MJPEG 调试预览，浏览器可以直接查看带框画面；后续再接入 MediaMTX 做生产级 RTSP/ WebRTC 网关。
@@ -33,7 +33,7 @@
 - CMake 3.16+
 - 若使用 `CMakePresets.json`，建议 CMake 3.21+
 - 支持 C++17 的编译器
-- 使用 `preprocess.backend: "opencv"` 时，需要安装 OpenCV 开发库，至少包含 `core`、`imgproc`、`imgcodecs` 组件
+- 使用 `pipeline.backend: "opencv"` 或启用 `debug_image` / `mjpeg` 输出时，需要安装 OpenCV 开发库，至少包含 `core`、`imgproc`、`imgcodecs` 组件
 
 ## 构建与测试
 
@@ -70,8 +70,8 @@ ctest --test-dir build --output-on-failure
 - `ENABLE_ASCENDCL`
   是否编译 AscendCL 推理后端；开发机可以关闭，部署到 Orange Pi AI Pro 时启用
 - `ENABLE_DVPP`
-  是否编译 Ascend DVPP 图像链路；需要同时开启 `ENABLE_ASCENDCL`。当前可配置
-  `preprocess.backend`、`postprocess.backend`、`overlay.backend` 为 `dvpp`
+  是否编译 Ascend DVPP 图像链路；需要同时开启 `ENABLE_ASCENDCL`。运行期通过
+  `pipeline.backend: "dvpp"` 启用 DVPP 可加速的图像处理环节
 - `ENABLE_OPENCV_PREPROCESSOR`
   是否编译 OpenCV 图像预处理后端；使用当前 `config/dev` 和 `config/prod` 时应保持开启
 - `ENABLE_OPENCV_POSTPROCESSOR`
@@ -156,8 +156,10 @@ cameras:
 YOLO 后处理在 `config/*/sentinel.yaml` 中配置：
 
 ```yaml
-postprocess:
+pipeline:
   backend: "opencv"          # opencv / dvpp
+
+postprocess:
   model_type: "yolo"
   output_layout: "channels_first"  # channels_first=[1,84,8400], anchors_first=[1,8400,84]
   num_classes: 80
@@ -178,9 +180,11 @@ postprocess:
 视频结果输出在 `config/*/sentinel.yaml` 中配置：
 
 ```yaml
+pipeline:
+  backend: "opencv"          # opencv / dvpp
+
 overlay:
   enabled: true
-  backend: "opencv"          # opencv / dvpp
 
 output:
   video_sink: "mjpeg"        # none / debug_image / mjpeg
@@ -542,14 +546,14 @@ cmake --build build
   `.om` 模型路径，AscendCL 后端会加载该文件
 - `inference.device_id`
   AscendCL 设备编号，单设备通常为 `0`
-- `preprocess.backend`
-  图像预处理后端，当前支持 `opencv` 和预留的 `dvpp`
-- `postprocess.backend`
-  YOLO 后处理后端，当前支持 `opencv` 和预留的 `dvpp`
+- `pipeline.backend`
+  图像处理链路后端，当前支持 `opencv` 和 `dvpp`。选择 `opencv` 时默认不开启 DVPP；选择 `dvpp` 时，系统会在 DVPP 能加速的环节优先使用 DVPP
+- `preprocess.output_width` / `preprocess.output_height`
+  模型输入图像尺寸，必须与 `.om` 模型输入匹配
+- `preprocess.output_layout` / `preprocess.output_dtype`
+  模型输入张量布局和数据类型，当前固定支持 `NCHW` 和 `FP32`
 - `overlay.enabled`
   是否在输出图像上绘制检测框
-- `overlay.backend`
-  检测框绘制使用的图像后端，当前支持 `opencv` 和预留的 `dvpp`
 - `output.video_sink`
   视频结果输出通道，当前支持 `none`、`debug_image` 和 `mjpeg`
 - `output.debug_image_dir`
@@ -615,6 +619,6 @@ cmake --build build
 - `scripts/run-board-mjpeg-preview.sh`
   临时启用 MJPEG 预览并运行 `video_sentinel`
 - `scripts/run-board-perf-matrix.sh`
-  依次运行预处理后端和输出通道性能对照，并生成日志和 CSV；可用 `PREPROCESSORS="opencv dvpp"` 控制
+  依次运行流水线后端和输出通道性能对照，并生成日志和 CSV；可用 `BACKENDS="opencv dvpp"` 控制
 - `scripts/run-board-dvpp-probe.sh`
   在开发板上运行 `sentinel_dvpp_probe`，验证 DVPP runtime 和可选 JPEG 预处理

@@ -12,7 +12,7 @@ namespace sentinel {
  *
  * 当前实现使用 DVPP 完成 MJPEG 解码，返回 Host BGR24 图像给调试图和
  * MJPEG 输出链路。缩放、张量打包和画框在 Host BGR24 缓冲区上完成，
- * 主要用于让 `overlay.backend: dvpp` 的完整链路可运行和可对比。
+ * 主要用于让 `pipeline.backend: dvpp` 的图像链路可运行和可对比。
  */
 class DvppImageBackend final : public ImageBackend {
 public:

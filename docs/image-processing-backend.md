@@ -133,15 +133,14 @@ output.video_sink: "mjpeg"
 
 ## 配置建议
 
-当前仍保留阶段级配置：
+用户可见配置只保留流水线级后端选择：
 
 ```yaml
-preprocess:
+pipeline:
   backend: "opencv"
 
 overlay:
   enabled: true
-  backend: "opencv"
 
 output:
   video_sink: "mjpeg"            # none / debug_image / mjpeg
@@ -154,23 +153,14 @@ output:
   mjpeg_max_clients: 4
 ```
 
-这样后续可以按阶段分别对比：
+配置加载器会把 `pipeline.backend` 映射到内部策略：
 
 ```text
-预处理使用 DVPP，画框使用 OpenCV
-预处理使用 OpenCV，画框使用 DVPP
-全链路使用 OpenCV
-全链路使用 DVPP
+opencv -> OpenCvFramePreprocessor + OpenCV YOLO 后处理 + OpenCvImageBackend
+dvpp   -> DvppFramePreprocessor + 纯 C++ YOLO 后处理 + DvppImageBackend
 ```
 
-如果后续希望统一控制，也可以新增：
-
-```yaml
-image:
-  default_backend: "opencv"
-```
-
-但不建议删除阶段级配置，因为不同阶段的硬件支持程度和性能瓶颈可能不同。
+选择 `dvpp` 不表示所有代码都由 DVPP 硬件执行。YOLO NMS、归一化打包和当前画框仍可能运行在 CPU 侧；DVPP 只负责它能加速的解码、缩放等图像处理环节。
 
 ## 后续推进顺序
 

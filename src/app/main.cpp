@@ -37,6 +37,8 @@ int main(int argc, char** argv)
 #endif
         logger->info("service: " + config.service.host + ":" + std::to_string(config.service.port));
         logger->info("logging: backend=" + config.logging.backend + " level=" + config.logging.level);
+        logger->info("pipeline: backend=" + config.pipeline.backend +
+                     " max_frames=" + std::to_string(config.pipeline.max_frames));
         logger->debug("debug logging enabled");
         logger->info("camera: " + config.cameras.front().id + " type=" + config.cameras.front().type);
 
@@ -57,7 +59,7 @@ int main(int argc, char** argv)
                          std::to_string(event.confidence));
         }
 
-        if (result.frames_processed < config.service.max_frames) {
+        if (result.frames_processed < config.pipeline.max_frames) {
             logger->warn("shutdown before reaching configured max_frames");
         }
 
