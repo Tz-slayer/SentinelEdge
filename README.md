@@ -596,3 +596,4 @@ cmake --build build
 - [项目结构](docs/project-structure.md)
 - [图像处理后端设计](docs/image-processing-backend.md)
 - [MJPEG 调试预览设计](docs/mjpeg-preview.md)
+- [测试策略讨论稿](docs/testing-strategy.md)
