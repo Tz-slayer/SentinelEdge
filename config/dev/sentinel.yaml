@@ -9,15 +9,15 @@ logging:
 
 inference:
   backend: "ascendcl"
-  model_path: "models/yolo/yolo26n.om"
+  model_path: "models/yolo/yolo26n_aipp_nv12.om"
   device_id: 0
 
 preprocess:
   output_width: 640
   output_height: 640
-  output_layout: "NCHW"
-  output_dtype: "FP32"
-  normalize: true
+  output_layout: "NV12"
+  output_dtype: "UINT8"
+  normalize: false
 
 postprocess:
   model_type: "yolo"
@@ -50,5 +50,5 @@ runtime:
   data_dir: "./data/dev"
 
 pipeline:
-  backend: "opencv"
+  backend: "dvpp"
   max_frames: 300

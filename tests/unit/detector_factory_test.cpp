@@ -40,7 +40,7 @@ int main()
 
     sentinel::InferenceConfig ascend_config;
     ascend_config.backend = "ascendcl";
-    ascend_config.model_path = "models/yolo/yolo26n.om";
+    ascend_config.model_path = "models/yolo/yolo26n_aipp_nv12.om";
 
     const auto ascend_detector = sentinel::create_detector(ascend_config, rules, postprocess);
     expect(ascend_detector != nullptr, "ascendcl detector strategy should be created");

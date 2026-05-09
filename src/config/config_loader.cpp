@@ -403,6 +403,26 @@ void apply_pipeline_backend(SentinelConfig& config)
     }
 }
 
+/**
+ * @brief 判断预处理张量格式是否为传统 OpenCV 路径支持的 NCHW FP32。
+ * @param config 预处理配置。
+ * @return 是 NCHW/FP32 返回 `true`。
+ */
+bool is_nchw_fp32_preprocess(const PreprocessConfig& config)
+{
+    return config.output_layout == "NCHW" && config.output_dtype == "FP32";
+}
+
+/**
+ * @brief 判断预处理张量格式是否为静态 AIPP 模型使用的 NV12 UINT8。
+ * @param config 预处理配置。
+ * @return 是 NV12/UINT8 返回 `true`。
+ */
+bool is_nv12_uint8_preprocess(const PreprocessConfig& config)
+{
+    return config.output_layout == "NV12" && config.output_dtype == "UINT8";
+}
+
 } // namespace
 
 /**
@@ -462,11 +482,16 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     if (config.preprocess.output_width <= 0 || config.preprocess.output_height <= 0) {
         throw std::runtime_error("preprocess output size must be positive");
     }
-    if (config.preprocess.output_layout != "NCHW") {
-        throw std::runtime_error("preprocess.output_layout currently supports only NCHW");
+    if (config.preprocess.backend == "opencv" && !is_nchw_fp32_preprocess(config.preprocess)) {
+        throw std::runtime_error("opencv preprocess requires output_layout=NCHW and output_dtype=FP32");
     }
-    if (config.preprocess.output_dtype != "FP32") {
-        throw std::runtime_error("preprocess.output_dtype currently supports only FP32");
+    if (config.preprocess.backend == "dvpp" && !is_nchw_fp32_preprocess(config.preprocess) &&
+        !is_nv12_uint8_preprocess(config.preprocess)) {
+        throw std::runtime_error(
+            "dvpp preprocess requires NCHW/FP32 or NV12/UINT8 output format");
+    }
+    if (is_nv12_uint8_preprocess(config.preprocess) && config.preprocess.normalize) {
+        throw std::runtime_error("NV12/UINT8 preprocess requires normalize=false");
     }
     if (config.postprocess.backend.empty()) {
         throw std::runtime_error("postprocess.backend must not be empty");

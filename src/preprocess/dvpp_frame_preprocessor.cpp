@@ -19,6 +19,26 @@
 namespace sentinel {
 namespace {
 
+/**
+ * @brief 判断预处理配置是否请求输出 AIPP 可消费的 NV12 张量。
+ * @param config 预处理配置。
+ * @return 请求 NV12/UINT8 输出返回 `true`。
+ */
+bool wants_nv12_tensor(const PreprocessConfig& config) noexcept
+{
+    return config.output_layout == "NV12" && config.output_dtype == "UINT8";
+}
+
+/**
+ * @brief 判断预处理配置是否请求输出传统 RGB NCHW FP32 张量。
+ * @param config 预处理配置。
+ * @return 请求 NCHW/FP32 输出返回 `true`。
+ */
+bool wants_nchw_fp32_tensor(const PreprocessConfig& config) noexcept
+{
+    return config.output_layout == "NCHW" && config.output_dtype == "FP32";
+}
+
 #if SENTINEL_ENABLE_DVPP
 
 /**
@@ -282,12 +302,12 @@ public:
             last_error_ = "preprocess output size must be positive";
             return false;
         }
-        if (config_.output_layout != "NCHW") {
-            last_error_ = "DVPP preprocessor currently supports only NCHW layout";
+        if (!wants_nchw_fp32_tensor(config_) && !wants_nv12_tensor(config_)) {
+            last_error_ = "DVPP preprocessor supports NCHW/FP32 or NV12/UINT8 output";
             return false;
         }
-        if (config_.output_dtype != "FP32") {
-            last_error_ = "DVPP preprocessor currently supports only FP32 dtype";
+        if (wants_nv12_tensor(config_) && config_.normalize) {
+            last_error_ = "NV12/UINT8 output requires normalize=false";
             return false;
         }
 
@@ -492,13 +512,19 @@ public:
         }
 
         TensorBuffer tensor;
-        tensor.data = pack_nv12_to_rgb_nchw_fp32(host_nv12,
-                                                 config_.output_width,
-                                                 config_.output_height,
-                                                 output_width_stride,
-                                                 output_height_stride,
-                                                 config_.normalize);
-        tensor.shape = {1, 3, config_.output_height, config_.output_width};
+        if (wants_nv12_tensor(config_)) {
+            // 静态 AIPP 模型直接消费 NV12/YUV420SP_U8，避免 CPU 侧 RGB/NCHW/FP32 打包。
+            tensor.data = std::move(host_nv12);
+            tensor.shape = {1, 1, config_.output_height, config_.output_width};
+        } else {
+            tensor.data = pack_nv12_to_rgb_nchw_fp32(host_nv12,
+                                                     config_.output_width,
+                                                     config_.output_height,
+                                                     output_width_stride,
+                                                     output_height_stride,
+                                                     config_.normalize);
+            tensor.shape = {1, 3, config_.output_height, config_.output_width};
+        }
         tensor.layout = config_.output_layout;
         tensor.dtype = config_.output_dtype;
         tensor.frame_sequence = frame.sequence;
@@ -613,7 +639,7 @@ void DvppFramePreprocessor::close() noexcept
 /**
  * @brief 将视频帧转换为模型输入张量。
  * @param frame 视频源输出的原始帧。
- * @return 成功返回 NCHW FP32 张量；失败返回空。
+ * @return 成功返回配置指定格式的张量；失败返回空。
  */
 std::optional<TensorBuffer> DvppFramePreprocessor::process(const Frame& frame)
 {

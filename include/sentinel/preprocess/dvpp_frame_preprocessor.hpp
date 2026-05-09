@@ -10,9 +10,9 @@ namespace sentinel {
 /**
  * @brief DVPP 图像预处理策略。
  *
- * 当前实现面向 copy 模式：MJPEG 输入帧先在 DVPP 中完成 JPEGD 解码和 VPC
- * 缩放，再拷回 Host 侧打包为 NCHW FP32 Tensor。该阶段用于和 OpenCV
- * 预处理链路做性能对比，后续零拷贝版本会继续把输出保留在 Device 内存中。
+ * MJPEG 输入帧先在 DVPP 中完成 JPEGD 解码和 VPC 缩放。使用静态 AIPP
+ * 模型时输出 `NV12`/`UINT8` 张量；使用旧模型时仍可输出 `NCHW`/`FP32`
+ * 张量。当前输出仍会拷回 Host，后续版本会继续把输出保留在 Device 内存中。
  */
 class DvppFramePreprocessor final : public FramePreprocessor {
 public:
@@ -28,20 +28,20 @@ public:
     ~DvppFramePreprocessor() override;
 
     /**
-     * @brief 报告 DVPP 策略尚未实现。
-     * @return 固定返回 `false`。
+     * @brief 初始化 DVPP 运行时、stream 和处理通道。
+     * @return 成功返回 `true`，失败返回 `false`。
      */
     bool open() override;
 
     /**
-     * @brief 占位释放函数。
+     * @brief 释放 DVPP 运行时资源。
      */
     void close() noexcept override;
 
     /**
-     * @brief 占位预处理函数。
+     * @brief 将 MJPEG 帧转换为模型输入张量。
      * @param frame 视频源输出的原始帧。
-     * @return 固定返回空。
+     * @return 成功返回张量；失败返回空。
      */
     std::optional<TensorBuffer> process(const Frame& frame) override;
 

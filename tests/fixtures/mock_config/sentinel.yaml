@@ -9,7 +9,7 @@ logging:
 
 inference:
   backend: "mock"
-  model_path: "models/yolo/yolo26n.om"
+  model_path: "models/yolo/yolo26n_aipp_nv12.om"
   device_id: 0
 
 preprocess:

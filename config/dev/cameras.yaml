@@ -3,7 +3,7 @@ cameras:
     name: "USB Camera"
     type: "v4l2"
     uri: "/dev/video0"
-    buffer_mode: "copy"
+    buffer_mode: "loaned"
     enabled: true
     width: 640
     height: 480

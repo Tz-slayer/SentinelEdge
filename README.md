@@ -22,7 +22,7 @@
 - `data/`：本地运行数据目录
 
 当前 C++ 程序已经接入 V4L2 摄像头、AscendCL 推理后端骨架、日志策略和部署包生成流程。mock 输入只保留给本机单元测试夹具，开发板调试配置不再使用 mock。
-图像预处理已经抽象为策略接口，用户通过 `pipeline.backend` 在 `opencv` 和 `dvpp` 之间切换。`opencv` 使用 CPU/OpenCV 完成解码、缩放和 NCHW FP32 张量打包；`dvpp` 在 JPEG 解码、缩放等 DVPP 能力范围内优先使用硬件加速，非 DVPP 能力仍由 CPU 侧代码完成。
+图像预处理已经抽象为策略接口，用户通过 `pipeline.backend` 在 `opencv` 和 `dvpp` 之间切换。`opencv` 使用 CPU/OpenCV 完成解码、缩放和 NCHW FP32 张量打包；`dvpp` 面向静态 AIPP 模型时会执行 JPEGD 解码和 VPC 缩放，并输出 NV12/YUV420SP UINT8 输入给 `.om` 模型。
 模型后处理已经抽象为策略接口，当前支持 YOLO FP32 输出解析、置信度过滤和 NMS；`dvpp` 配置路径下的 YOLO NMS 仍是 CPU 侧纯 C++ 实现，不伪装为 DVPP 硬件能力。
 摄像头配置已经支持运行期缓冲区模式开关：`buffer_mode: "copy"` 表示稳定的复制模式，`buffer_mode: "loaned"` 表示 V4L2 `mmap` 缓冲区租借模式，可减少摄像头帧进入 pipeline 时的一次用户态复制。
 图像处理能力已经统一抽象为 `ImageBackend`，当前 `opencv` 后端支持解码、缩放、张量打包和检测框绘制，`debug_image` 输出通道可以在开发板上保存带框 JPEG，用于验证检测结果是否可视化正确。
@@ -34,6 +34,7 @@
 - 若使用 `CMakePresets.json`，建议 CMake 3.21+
 - 支持 C++17 的编译器
 - 使用 `pipeline.backend: "opencv"` 或启用 `debug_image` / `mjpeg` 输出时，需要安装 OpenCV 开发库，至少包含 `core`、`imgproc`、`imgcodecs` 组件
+- 使用 `pipeline.backend: "dvpp"` 和静态 AIPP 模型时，`preprocess.output_layout` 应设置为 `NV12`，`preprocess.output_dtype` 应设置为 `UINT8`
 
 ## 构建与测试
 
@@ -159,7 +160,14 @@ YOLO 后处理在 `config/*/sentinel.yaml` 中配置：
 
 ```yaml
 pipeline:
-  backend: "opencv"          # opencv / dvpp
+  backend: "dvpp"            # opencv / dvpp
+
+preprocess:
+  output_width: 640
+  output_height: 640
+  output_layout: "NV12"      # 静态 AIPP OM 使用 NV12/YUV420SP_U8 输入
+  output_dtype: "UINT8"
+  normalize: false
 
 postprocess:
   model_type: "yolo"
@@ -315,13 +323,13 @@ cd ~/board-debug-package
 gdb -x debug/gdbinit --args ./bin/video_sentinel config/dev
 ```
 
-如果 `models/yolo/yolo26n.om` 存在，部署包中会生成：
+如果 `models/yolo/yolo26n_aipp_nv12.om` 存在，部署包中会生成：
 
 ```text
-build/prod-package/models/yolo/yolo26n.om
+build/prod-package/models/yolo/yolo26n_aipp_nv12.om
 ```
 
-这样 `config/prod/sentinel.yaml` 里的相对路径 `models/yolo/yolo26n.om`
+这样 `config/prod/sentinel.yaml` 里的相对路径 `models/yolo/yolo26n_aipp_nv12.om`
 在开发板上仍然可以从 `~/prod-package` 目录直接解析。
 
 如果只想查看 Compose 展开后的实际配置，可以运行：
@@ -553,7 +561,7 @@ cmake --build build
 - `preprocess.output_width` / `preprocess.output_height`
   模型输入图像尺寸，必须与 `.om` 模型输入匹配
 - `preprocess.output_layout` / `preprocess.output_dtype`
-  模型输入张量布局和数据类型，当前固定支持 `NCHW` 和 `FP32`
+  模型输入张量布局和数据类型。OpenCV 路径使用 `NCHW` / `FP32`；DVPP + 静态 AIPP 路径使用 `NV12` / `UINT8`
 - `overlay.enabled`
   是否在输出图像上绘制检测框
 - `output.video_sink`

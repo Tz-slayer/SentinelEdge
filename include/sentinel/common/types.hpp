@@ -31,15 +31,15 @@ struct LoggingConfig {
  */
 struct InferenceConfig {
     std::string backend{"mock"};
-    std::filesystem::path model_path{"models/yolo/yolo26n.om"};
+    std::filesystem::path model_path{"models/yolo/yolo26n_aipp_nv12.om"};
     int device_id{0};
 };
 
 /**
  * @brief 图像预处理策略运行配置。
  *
- * 该配置描述从视频帧到模型输入张量的转换方式。当前生产链路优先使用
- * OpenCV 实现软解码和缩放，后续可切换为 DVPP 以对比硬件预处理性能。
+ * 该配置描述从视频帧到模型输入张量的转换方式。OpenCV 路径输出
+ * `NCHW`/`FP32`；DVPP + 静态 AIPP 模型路径输出 `NV12`/`UINT8`。
  */
 struct PreprocessConfig {
     std::string backend{"opencv"};

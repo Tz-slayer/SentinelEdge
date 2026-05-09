@@ -44,7 +44,7 @@ public:
     /**
      * @brief 使用当前张量数据执行一次 AscendCL 同步推理。
      * @param tensor 待推理的模型输入张量，字节流必须与 `.om` 输入大小一致。
-     * @return 当前阶段暂不做 YOLO 后处理，成功推理后返回空检测列表。
+     * @return 成功返回后处理后的检测结果列表；失败返回空列表。
      */
     std::vector<Detection> detect(const TensorBuffer& tensor) override;
 
