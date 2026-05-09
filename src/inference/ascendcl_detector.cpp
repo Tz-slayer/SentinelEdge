@@ -1,5 +1,6 @@
 #include "sentinel/inference/ascendcl_detector.hpp"
 
+#include "sentinel/ascend/acl_runtime.hpp"
 #include "sentinel/postprocess/postprocessor_factory.hpp"
 
 #include <algorithm>
@@ -23,17 +24,6 @@ namespace {
 bool acl_ok(aclError error) noexcept
 {
     return error == ACL_SUCCESS;
-}
-
-/**
- * @brief 拼接 AscendCL 错误上下文。
- * @param action 失败的操作名称。
- * @param error AscendCL API 返回码。
- * @return 可读错误文本。
- */
-std::string make_acl_error(std::string_view action, aclError error)
-{
-    return std::string(action) + " failed, aclError=" + std::to_string(static_cast<int>(error));
 }
 
 /**
@@ -110,29 +100,12 @@ public:
     {
         close();
 
-        auto ret = aclInit(nullptr);
-        if (!acl_ok(ret)) {
-            set_error("aclInit", ret);
-            return false;
-        }
-        acl_initialized_ = true;
-
-        ret = aclrtSetDevice(config_.device_id);
-        if (!acl_ok(ret)) {
-            set_error("aclrtSetDevice", ret);
-            close();
-            return false;
-        }
-        device_set_ = true;
-
-        ret = aclrtCreateContext(&context_, config_.device_id);
-        if (!acl_ok(ret)) {
-            set_error("aclrtCreateContext", ret);
-            close();
+        runtime_session_ = AclRuntimeSession::acquire(config_.device_id, last_error_);
+        if (!runtime_session_) {
             return false;
         }
 
-        ret = aclmdlLoadFromFile(config_.model_path.c_str(), &model_id_);
+        auto ret = aclmdlLoadFromFile(config_.model_path.c_str(), &model_id_);
         if (!acl_ok(ret)) {
             set_error("aclmdlLoadFromFile", ret);
             close();
@@ -194,20 +167,7 @@ public:
             model_id_ = 0;
         }
 
-        if (context_ != nullptr) {
-            aclrtDestroyContext(context_);
-            context_ = nullptr;
-        }
-
-        if (device_set_) {
-            aclrtResetDevice(config_.device_id);
-            device_set_ = false;
-        }
-
-        if (acl_initialized_) {
-            aclFinalize();
-            acl_initialized_ = false;
-        }
+        runtime_session_.reset();
     }
 
     /**
@@ -443,7 +403,7 @@ private:
      */
     void set_error(std::string_view action, aclError error)
     {
-        last_error_ = make_acl_error(action, error);
+        last_error_ = make_acl_error(action, static_cast<int>(error));
     }
 
     InferenceConfig config_;
@@ -455,13 +415,11 @@ private:
     std::vector<DeviceBuffer> output_buffers_;
     std::vector<ModelOutputBuffer> raw_outputs_;
     std::unique_ptr<DetectionPostprocessor> postprocessor_;
-    aclrtContext context_{nullptr};
+    std::unique_ptr<AclRuntimeSession> runtime_session_;
     aclmdlDesc* model_desc_{nullptr};
     aclmdlDataset* input_dataset_{nullptr};
     aclmdlDataset* output_dataset_{nullptr};
     uint32_t model_id_{0};
-    bool acl_initialized_{false};
-    bool device_set_{false};
     bool model_loaded_{false};
 };
 

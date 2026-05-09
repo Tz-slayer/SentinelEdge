@@ -194,6 +194,8 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             config.inference.device_id = std::stoi(value);
         } else if (section == "preprocess" && key == "backend") {
             config.preprocess.backend = value;
+        } else if (section == "preprocess" && key == "device_id") {
+            config.preprocess.device_id = std::stoi(value);
         } else if (section == "preprocess" && key == "output_width") {
             config.preprocess.output_width = std::stoi(value);
         } else if (section == "preprocess" && key == "output_height") {
@@ -419,6 +421,9 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     }
     if (config.preprocess.backend != "opencv" && config.preprocess.backend != "dvpp") {
         throw std::runtime_error("preprocess.backend must be opencv or dvpp");
+    }
+    if (config.preprocess.device_id < 0) {
+        throw std::runtime_error("preprocess.device_id must not be negative");
     }
     if (config.preprocess.output_width <= 0 || config.preprocess.output_height <= 0) {
         throw std::runtime_error("preprocess output size must be positive");

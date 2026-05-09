@@ -43,6 +43,7 @@ struct InferenceConfig {
  */
 struct PreprocessConfig {
     std::string backend{"opencv"};
+    int device_id{0};
     int output_width{640};
     int output_height{640};
     std::string output_layout{"NCHW"};

@@ -69,6 +69,8 @@ ctest --test-dir build --output-on-failure
   是否启用 AddressSanitizer 和 UndefinedBehaviorSanitizer
 - `ENABLE_ASCENDCL`
   是否编译 AscendCL 推理后端；开发机可以关闭，部署到 Orange Pi AI Pro 时启用
+- `ENABLE_DVPP`
+  是否编译 Ascend DVPP 预处理链路；需要同时开启 `ENABLE_ASCENDCL`
 - `ENABLE_OPENCV_PREPROCESSOR`
   是否编译 OpenCV 图像预处理后端；使用当前 `config/dev` 和 `config/prod` 时应保持开启
 - `ENABLE_OPENCV_POSTPROCESSOR`
@@ -601,6 +603,7 @@ cmake --build build
 - [项目背景](docs/project-background.md)
 - [项目结构](docs/project-structure.md)
 - [图像处理后端设计](docs/image-processing-backend.md)
+- [DVPP 预处理链路](docs/dvpp-preprocess.md)
 - [MJPEG 调试预览设计](docs/mjpeg-preview.md)
 - [测试策略讨论稿](docs/testing-strategy.md)
 
@@ -611,4 +614,6 @@ cmake --build build
 - `scripts/run-board-mjpeg-preview.sh`
   临时启用 MJPEG 预览并运行 `video_sentinel`
 - `scripts/run-board-perf-matrix.sh`
-  依次运行 `none`、`debug_image`、`mjpeg` 三组输出通道性能对照，并生成日志和 CSV
+  依次运行预处理后端和输出通道性能对照，并生成日志和 CSV；可用 `PREPROCESSORS="opencv dvpp"` 控制
+- `scripts/run-board-dvpp-probe.sh`
+  在开发板上运行 `sentinel_dvpp_probe`，验证 DVPP runtime 和可选 JPEG 预处理

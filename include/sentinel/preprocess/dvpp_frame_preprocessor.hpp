@@ -2,15 +2,17 @@
 
 #include "sentinel/preprocess/frame_preprocessor.hpp"
 
+#include <memory>
 #include <string>
 
 namespace sentinel {
 
 /**
- * @brief DVPP 图像预处理策略占位实现。
+ * @brief DVPP 图像预处理策略。
  *
- * 该类先固定返回未实现错误，用于把策略边界落到代码结构中。后续接入
- * Ascend DVPP 时，应在该类内部管理 DVPP 通道、Device 内存和硬件解码资源。
+ * 当前实现面向 copy 模式：MJPEG 输入帧先在 DVPP 中完成 JPEGD 解码和 VPC
+ * 缩放，再拷回 Host 侧打包为 NCHW FP32 Tensor。该阶段用于和 OpenCV
+ * 预处理链路做性能对比，后续零拷贝版本会继续把输出保留在 Device 内存中。
  */
 class DvppFramePreprocessor final : public FramePreprocessor {
 public:
@@ -19,6 +21,11 @@ public:
      * @param config 图像预处理输出尺寸、布局和数据类型配置。
      */
     explicit DvppFramePreprocessor(PreprocessConfig config);
+
+    /**
+     * @brief 释放 DVPP 策略资源。
+     */
+    ~DvppFramePreprocessor() override;
 
     /**
      * @brief 报告 DVPP 策略尚未实现。
@@ -51,7 +58,13 @@ public:
     std::string_view last_error() const noexcept override;
 
 private:
+    /**
+     * @brief DVPP 资源和硬件 API 细节。
+     */
+    class Impl;
+
     PreprocessConfig config_;
+    std::unique_ptr<Impl> impl_;
     std::string last_error_;
 };
 

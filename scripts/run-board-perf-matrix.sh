@@ -6,6 +6,7 @@ CONFIG_DIR="${2:-config/dev}"
 FRAMES="${FRAMES:-300}"
 INTERVAL="${INTERVAL:-30}"
 SINKS="${SINKS:-none debug_image mjpeg}"
+PREPROCESSORS="${PREPROCESSORS:-opencv}"
 
 CONFIG_FILE="${PACKAGE_DIR}/${CONFIG_DIR}/sentinel.yaml"
 BACKUP_FILE="${CONFIG_FILE}.perf-matrix.bak"
@@ -28,31 +29,46 @@ restore_config() {
 }
 trap restore_config EXIT
 
-for sink in ${SINKS}; do
-    case "${sink}" in
-        none|debug_image|mjpeg)
+for preprocessor in ${PREPROCESSORS}; do
+    case "${preprocessor}" in
+        opencv|dvpp)
             ;;
         *)
-            printf 'unsupported sink in SINKS: %s\n' "${sink}" >&2
+            printf 'unsupported preprocessor in PREPROCESSORS: %s\n' "${preprocessor}" >&2
             exit 1
             ;;
     esac
 
-    csv_path="perf/pipeline-${sink}.csv"
-    log_path="${PERF_DIR}/run-${sink}.log"
+    for sink in ${SINKS}; do
+        case "${sink}" in
+            none|debug_image|mjpeg)
+                ;;
+            *)
+                printf 'unsupported sink in SINKS: %s\n' "${sink}" >&2
+                exit 1
+                ;;
+        esac
 
-    sed -i \
-        -e "s/^  video_sink:.*/  video_sink: \"${sink}\"/" \
-        -e "s/^  log_interval_frames:.*/  log_interval_frames: ${INTERVAL}/" \
-        -e "s|^  csv_path:.*|  csv_path: \"${csv_path}\"|" \
-        -e "s/^  max_frames:.*/  max_frames: ${FRAMES}/" \
-        "${CONFIG_FILE}"
+        csv_path="perf/pipeline-${preprocessor}-${sink}.csv"
+        log_path="${PERF_DIR}/run-${preprocessor}-${sink}.log"
 
-    printf 'running sink=%s frames=%s interval=%s\n' "${sink}" "${FRAMES}" "${INTERVAL}"
-    (
-        cd "${PACKAGE_DIR}"
-        ./bin/video_sentinel "${CONFIG_DIR}"
-    ) 2>&1 | tee "${log_path}"
+        perl -0pi -e "s/(preprocess:\\n\\s+backend: )\"(?:opencv|dvpp)\"/\${1}\"${preprocessor}\"/" \
+            "${CONFIG_FILE}"
+
+        sed -i \
+            -e "s/^  video_sink:.*/  video_sink: \"${sink}\"/" \
+            -e "s/^  log_interval_frames:.*/  log_interval_frames: ${INTERVAL}/" \
+            -e "s|^  csv_path:.*|  csv_path: \"${csv_path}\"|" \
+            -e "s/^  max_frames:.*/  max_frames: ${FRAMES}/" \
+            "${CONFIG_FILE}"
+
+        printf 'running preprocessor=%s sink=%s frames=%s interval=%s\n' \
+            "${preprocessor}" "${sink}" "${FRAMES}" "${INTERVAL}"
+        (
+            cd "${PACKAGE_DIR}"
+            ./bin/video_sentinel "${CONFIG_DIR}"
+        ) 2>&1 | tee "${log_path}"
+    done
 done
 
 printf 'performance logs: %s\n' "${PERF_DIR}"

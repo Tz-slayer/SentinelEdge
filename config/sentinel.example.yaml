@@ -14,6 +14,7 @@ inference:
 
 preprocess:
   backend: "opencv"
+  device_id: 0
   output_width: 640
   output_height: 640
   output_layout: "NCHW"

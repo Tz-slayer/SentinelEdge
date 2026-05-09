@@ -24,6 +24,7 @@ option(ENABLE_DEV_WARNINGS "Enable extra compiler warnings" ON)
 option(ENABLE_DEV_LOGGING "Enable development-oriented runtime logging" ON)
 option(ENABLE_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
 option(ENABLE_ASCENDCL "Build AscendCL inference backend" OFF)
+option(ENABLE_DVPP "Build Ascend DVPP image preprocessing backend" OFF)
 option(ENABLE_OPENCV_PREPROCESSOR "Build OpenCV frame preprocessing backend" ON)
 option(ENABLE_OPENCV_POSTPROCESSOR "Build OpenCV YOLO postprocessing backend" ON)
 option(INSTALL_DEBUG_SOURCE "Install a compact source snapshot for board-side GDB debugging" OFF)
@@ -31,6 +32,10 @@ option(INSTALL_DEBUG_SOURCE "Install a compact source snapshot for board-side GD
 set(SENTINEL_DEFAULT_CONFIG_DIR "config/prod" CACHE STRING "Default runtime config directory")
 set(ASCENDCL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ascend-cann/8.0.0" CACHE PATH "AscendCL CANN root directory")
 set(ASCENDCL_LIB_DIR "" CACHE PATH "Optional AscendCL library directory")
+
+if(ENABLE_DVPP AND NOT ENABLE_ASCENDCL)
+    message(FATAL_ERROR "ENABLE_DVPP=ON requires ENABLE_ASCENDCL=ON because DVPP uses the ACL runtime")
+endif()
 
 if(ENABLE_ASCENDCL)
     if(NOT EXISTS "${ASCENDCL_ROOT}/include/acl/acl.h")
@@ -65,6 +70,17 @@ if(ENABLE_ASCENDCL)
 
     get_filename_component(ASCENDCL_RESOLVED_LIB_DIR "${ASCENDCL_LIBRARY}" DIRECTORY)
     set(ASCENDCL_LIB_DIR "${ASCENDCL_RESOLVED_LIB_DIR}" CACHE PATH "Resolved AscendCL library directory" FORCE)
+
+    if(ENABLE_DVPP)
+        find_library(ACL_DVPP_LIBRARY acl_dvpp PATHS ${ASCENDCL_LIBRARY_SEARCH_PATHS} NO_DEFAULT_PATH)
+        if(NOT ACL_DVPP_LIBRARY)
+            message(FATAL_ERROR
+                "ENABLE_DVPP=ON requires libacl_dvpp.so. "
+                "Searched: ${ASCENDCL_LIBRARY_SEARCH_PATHS}. "
+                "Set ASCENDCL_LIB_DIR explicitly if your toolkit uses a different layout."
+            )
+        endif()
+    endif()
 endif()
 
 set(SENTINEL_OPENCV_COMPONENTS)
@@ -95,9 +111,17 @@ target_compile_definitions(sentinel_project_options
         SENTINEL_ENABLE_DEV_LOGGING=$<IF:$<BOOL:${ENABLE_DEV_LOGGING}>,1,0>
         SENTINEL_ENABLE_MOCK_SOURCES=$<IF:$<BOOL:${ENABLE_MOCK_SOURCES}>,1,0>
         SENTINEL_ENABLE_ASCENDCL=$<IF:$<BOOL:${ENABLE_ASCENDCL}>,1,0>
+        SENTINEL_ENABLE_DVPP=$<IF:$<BOOL:${ENABLE_DVPP}>,1,0>
         SENTINEL_ENABLE_OPENCV_PREPROCESSOR=$<IF:$<BOOL:${ENABLE_OPENCV_PREPROCESSOR}>,1,0>
         SENTINEL_ENABLE_OPENCV_POSTPROCESSOR=$<IF:$<BOOL:${ENABLE_OPENCV_POSTPROCESSOR}>,1,0>
 )
+
+if(ENABLE_DVPP)
+    target_compile_definitions(sentinel_project_options
+        INTERFACE
+            ENABLE_DVPP_INTERFACE
+    )
+endif()
 
 if(ENABLE_DEV_WARNINGS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(sentinel_project_options
@@ -151,10 +175,12 @@ set(SENTINEL_CORE_SOURCES
 
 if(ENABLE_ASCENDCL)
     list(APPEND SENTINEL_CORE_SOURCES
+        src/ascend/acl_runtime.cpp
         src/inference/ascendcl_detector.cpp
     )
 else()
     list(APPEND SENTINEL_CORE_SOURCES
+        src/ascend/acl_runtime_stub.cpp
         src/inference/ascendcl_detector_stub.cpp
     )
 endif()
@@ -222,6 +248,13 @@ if(ENABLE_ASCENDCL)
             ${ASCENDCL_LIBRARY}
     )
 
+    if(ENABLE_DVPP)
+        target_link_libraries(sentinel_core
+            PUBLIC
+                ${ACL_DVPP_LIBRARY}
+        )
+    endif()
+
     set_target_properties(sentinel_core
         PROPERTIES
             BUILD_RPATH "${ASCENDCL_LIB_DIR}"
@@ -259,10 +292,20 @@ target_link_libraries(sentinel_camera_probe
         sentinel_core
 )
 
+add_executable(sentinel_dvpp_probe
+    tools/dvpp_probe.cpp
+)
+
+target_link_libraries(sentinel_dvpp_probe
+    PRIVATE
+        sentinel_core
+)
+
 install(
     TARGETS
         video_sentinel
         sentinel_camera_probe
+        sentinel_dvpp_probe
     RUNTIME DESTINATION bin
 )
 
@@ -468,6 +511,7 @@ message(STATUS "ENABLE_DEV_WARNINGS=${ENABLE_DEV_WARNINGS}")
 message(STATUS "ENABLE_DEV_LOGGING=${ENABLE_DEV_LOGGING}")
 message(STATUS "ENABLE_SANITIZERS=${ENABLE_SANITIZERS}")
 message(STATUS "ENABLE_ASCENDCL=${ENABLE_ASCENDCL}")
+message(STATUS "ENABLE_DVPP=${ENABLE_DVPP}")
 message(STATUS "ENABLE_OPENCV_PREPROCESSOR=${ENABLE_OPENCV_PREPROCESSOR}")
 message(STATUS "ENABLE_OPENCV_POSTPROCESSOR=${ENABLE_OPENCV_POSTPROCESSOR}")
 message(STATUS "INSTALL_DEBUG_SOURCE=${INSTALL_DEBUG_SOURCE}")
