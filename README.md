@@ -28,6 +28,8 @@
 图像处理能力已经统一抽象为 `ImageBackend`，当前 `opencv` 后端支持解码、缩放、张量打包和检测框绘制，`debug_image` 输出通道可以在开发板上保存带框 JPEG，用于验证检测结果是否可视化正确。
 视频输出已经抽象为 `VideoSink`，当前支持 `none`、`debug_image` 和 `mjpeg`。`mjpeg` 使用 Linux socket 启动本地 HTTP MJPEG 调试预览，浏览器可以直接查看带框画面；后续再接入 MediaMTX 做生产级 RTSP/ WebRTC 网关。
 
+DVPP/零拷贝优化的当前边界已经记录在 [DVPP 预处理链路](docs/dvpp-preprocess.md)：主推理链路已经完成 V4L2 loaned、DVPP buffer/descriptor 复用、VPC 直写模型输入 Device buffer；剩余瓶颈主要来自 Host 侧 MJPEG 输入、模型输出回 Host 后处理，以及调试预览的 Host 画框和编码。
+
 ## 构建要求
 
 - CMake 3.16+

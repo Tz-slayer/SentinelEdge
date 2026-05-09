@@ -47,6 +47,31 @@ overlay:
 - 后处理：使用独立的纯 C++ YOLO 解码和 NMS。YOLO NMS 不属于 DVPP 图像硬件能力，因此不伪装成硬件加速。
 - 画框输出：使用 `DvppImageBackend` 解码摄像头 MJPEG 帧，随后在 Host BGR24 缓冲区绘制检测框。
 
+## 零拷贝与资源复用优化
+
+当前已经完成的是 DVPP 推理主链路内能稳定落地的零拷贝和资源复用优化：
+
+```text
+V4L2 loaned MJPEG payload
+  -> DVPP JPEGD 复用输出 Device buffer
+  -> DVPP VPC 直接写入 AscendCL 模型输入 Device buffer
+  -> AscendCL detector 跳过 Host-to-Device 输入拷贝
+  -> 静态 AIPP OM
+```
+
+具体优化点：
+
+- `camera.buffer_mode: "loaned"` 避免 V4L2 `mmap` 缓冲区到 `Frame::data` 的用户态复制。
+- `Detector::mutable_input_tensor()` 暴露 AscendCL 模型输入 Device buffer 视图。
+- `FramePreprocessor::process_into()` 允许 DVPP 预处理直接写入调用方提供的目标张量。
+- `DvppFramePreprocessor` 在静态 AIPP 路径下让 VPC 输出直接落到模型输入 Device buffer。
+- `AscendClDetector::detect()` 收到同一块模型输入 Device buffer 时跳过输入拷贝；收到其他 Device buffer 时只做 Device-to-Device 拷贝。
+- `DvppFramePreprocessor` 复用 JPEGD 输出 Device buffer、Host fallback 的 VPC 输出 Device buffer、`acldvppPicDesc` 和 `acldvppResizeConfig`。
+- `DvppImageBackend` 复用调试输出链路的 JPEGD 输出 Device buffer、Host NV12 缓冲区和 `acldvppPicDesc`。
+- debug 日志会打印模型输入张量 `memory=host/device`，用于确认当前是否走到 Device buffer 直写路径。
+
+这部分优化的核心收益是减少 `DVPP -> Host -> AscendCL input` 往返拷贝，以及减少主循环中每帧 `aclrtMalloc/free` 和 DVPP 描述对象创建销毁。
+
 ## 当前限制
 
 - `pipeline.backend: "dvpp"` 当前要求摄像头输入为 `V4L2_PIX_FMT_MJPEG`，因为 DVPP 预处理路径使用 JPEGD 解码。
@@ -58,6 +83,15 @@ overlay:
 - DVPP 图像后端的调试输出链路已复用 JPEGD buffer、Host NV12 buffer 和 PicDesc。
 - DVPP 画框链路的解码使用 DVPP，但画框当前在 Host BGR24 缓冲区上完成，不是 DVPP OSD。
 - `mjpeg` 和 `debug_image` 输出最终 JPEG 编码仍复用当前 OpenCV 输出实现。
+
+因此，在当前 USB 摄像头 MJPEG、静态 AIPP OM、CPU YOLO 后处理和 OpenCV 画框架构下，DVPP/零拷贝方向已经接近边界。继续优化主要不再属于 DVPP 零拷贝问题，而是后处理逻辑、输出调度或整体架构调整。
+
+如果后续要继续追求更彻底的硬件化，需要改变链路形态：
+
+- 摄像头输入改成支持 DMA-BUF 或硬件视频解码直接接入的路径。
+- YOLO decode/NMS 下沉到模型、Ascend 自定义算子或其他 Device 侧后处理。
+- 可视化输出改为硬件 OSD、硬件编码或独立的低频调试输出链路。
+- 主推理链路和 Web 预览链路彻底解耦，避免调试预览影响推理吞吐。
 
 ## 配置方式
 
