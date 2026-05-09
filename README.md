@@ -24,7 +24,7 @@
 当前 C++ 程序已经接入 V4L2 摄像头、AscendCL 推理后端骨架、日志策略和部署包生成流程。mock 输入只保留给本机单元测试夹具，开发板调试配置不再使用 mock。
 图像预处理已经抽象为策略接口，用户通过 `pipeline.backend` 在 `opencv` 和 `dvpp` 之间切换。`opencv` 使用 CPU/OpenCV 完成解码、缩放和 NCHW FP32 张量打包；`dvpp` 在 JPEG 解码、缩放等 DVPP 能力范围内优先使用硬件加速，非 DVPP 能力仍由 CPU 侧代码完成。
 模型后处理已经抽象为策略接口，当前支持 YOLO FP32 输出解析、置信度过滤和 NMS；`dvpp` 配置路径下的 YOLO NMS 仍是 CPU 侧纯 C++ 实现，不伪装为 DVPP 硬件能力。
-摄像头配置已经预留运行期缓冲区模式开关：`buffer_mode: "copy"` 表示稳定的复制模式，`buffer_mode: "loaned"` 预留给后续 V4L2 零拷贝租借缓冲区模式。
+摄像头配置已经支持运行期缓冲区模式开关：`buffer_mode: "copy"` 表示稳定的复制模式，`buffer_mode: "loaned"` 表示 V4L2 `mmap` 缓冲区租借模式，可减少摄像头帧进入 pipeline 时的一次用户态复制。
 图像处理能力已经统一抽象为 `ImageBackend`，当前 `opencv` 后端支持解码、缩放、张量打包和检测框绘制，`debug_image` 输出通道可以在开发板上保存带框 JPEG，用于验证检测结果是否可视化正确。
 视频输出已经抽象为 `VideoSink`，当前支持 `none`、`debug_image` 和 `mjpeg`。`mjpeg` 使用 Linux socket 启动本地 HTTP MJPEG 调试预览，浏览器可以直接查看带框画面；后续再接入 MediaMTX 做生产级 RTSP/ WebRTC 网关。
 
@@ -150,8 +150,10 @@ cameras:
     buffer_mode: "copy"    # copy / loaned
 ```
 
-当前可运行路径是 `copy`。`loaned` 会被配置系统识别，但 V4L2 源会拒绝启动并提示需要
-`FrameView/FrameLease` 生命周期支持；这是后续实现真正零拷贝对比实验的入口。
+`copy` 会在 `VIDIOC_DQBUF` 后把驱动缓冲区复制到 `Frame::data`，随后立即 `VIDIOC_QBUF`
+归还给驱动。`loaned` 不复制帧载荷，而是让 `Frame` 持有 V4L2 buffer 租约，最后一个
+`Frame` 释放时自动 `VIDIOC_QBUF`。当前 `loaned` 仍会在 DVPP/OpenCV 预处理阶段产生后续
+格式转换和模型输入拷贝，它优化的是“摄像头帧进入 pipeline”这一段。
 
 YOLO 后处理在 `config/*/sentinel.yaml` 中配置：
 

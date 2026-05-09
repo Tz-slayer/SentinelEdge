@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -175,6 +176,33 @@ struct Rect {
 };
 
 /**
+ * @brief 视频帧外部载荷的生命周期租约。
+ *
+ * 该接口用于表达非 `Frame::data` 拥有的帧载荷生命周期，例如 V4L2
+ * `mmap` 缓冲区。最后一个持有租约的 `Frame` 销毁时，具体实现负责把
+ * 底层缓冲区归还给驱动或释放相关资源。析构函数必须保持 `noexcept`，
+ * 不允许在信号边界或清理路径抛出异常。
+ */
+class FramePayloadLease {
+public:
+    /**
+     * @brief 释放帧载荷租约。
+     */
+    virtual ~FramePayloadLease() = default;
+
+protected:
+    /**
+     * @brief 只允许派生类构造租约对象。
+     */
+    FramePayloadLease() = default;
+
+    FramePayloadLease(const FramePayloadLease&) = delete;
+    FramePayloadLease& operator=(const FramePayloadLease&) = delete;
+    FramePayloadLease(FramePayloadLease&&) = delete;
+    FramePayloadLease& operator=(FramePayloadLease&&) = delete;
+};
+
+/**
  * @brief 一帧采集结果及其关联元数据。
  */
 struct Frame {
@@ -186,6 +214,36 @@ struct Frame {
     std::int64_t timestamp_ns{0};
     std::size_t bytes_used{0};
     std::vector<std::uint8_t> data;
+    const std::uint8_t* loaned_data{nullptr};
+    std::size_t loaned_size{0};
+    std::shared_ptr<FramePayloadLease> payload_lease;
+
+    /**
+     * @brief 返回当前帧载荷的只读起始地址。
+     * @return `loaned` 模式返回驱动缓冲区地址，`copy` 模式返回 `data.data()`。
+     */
+    const std::uint8_t* payload_data() const noexcept
+    {
+        return loaned_data != nullptr ? loaned_data : data.data();
+    }
+
+    /**
+     * @brief 返回当前帧载荷的有效字节数。
+     * @return `loaned` 模式返回租借缓冲区有效长度，`copy` 模式返回 `data` 长度。
+     */
+    std::size_t payload_size() const noexcept
+    {
+        return loaned_data != nullptr ? loaned_size : data.size();
+    }
+
+    /**
+     * @brief 判断当前帧是否持有外部缓冲区租约。
+     * @return 使用 `loaned` 外部载荷返回 `true`。
+     */
+    bool is_loaned() const noexcept
+    {
+        return loaned_data != nullptr;
+    }
 };
 
 /**

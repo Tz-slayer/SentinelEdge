@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <memory>
 #include <utility>
 
 #include <fcntl.h>
@@ -36,7 +37,84 @@ std::int64_t to_timestamp_ns(const timeval& value)
            static_cast<std::int64_t>(value.tv_usec) * 1000LL;
 }
 
+/**
+ * @brief 在析构路径中重试 `ioctl`，避免 `EINTR` 导致缓冲区未归还。
+ * @param fd 已打开的 V4L2 设备描述符。
+ * @param request V4L2 ioctl 请求号。
+ * @param arg 请求载荷地址。
+ * @return 原始 `ioctl` 返回值。
+ */
+int xioctl_noexcept(int fd, unsigned long request, void* arg) noexcept
+{
+    int result = -1;
+    do {
+        result = ::ioctl(fd, request, arg);
+    } while (result == -1 && errno == EINTR);
+    return result;
+}
+
 } // namespace
+
+/**
+ * @brief V4L2 设备状态，供外部帧租约判断是否还能归还缓冲区。
+ */
+struct CameraVideoSource::DeviceState {
+    int fd{-1};
+    bool streaming{false};
+};
+
+/**
+ * @brief V4L2 `mmap` 缓冲区租约。
+ *
+ * 该对象绑定一次 `VIDIOC_DQBUF` 出队结果。对象析构时，如果设备仍在
+ * streaming 状态，会自动执行 `VIDIOC_QBUF`，把缓冲区归还给驱动。
+ */
+class V4l2BufferLease final : public FramePayloadLease {
+public:
+    /**
+     * @brief 构造 V4L2 缓冲区租约。
+     * @param state 摄像头设备状态。
+     * @param buffer 已出队的 V4L2 缓冲区描述。
+     */
+    V4l2BufferLease(std::shared_ptr<CameraVideoSource::DeviceState> state, v4l2_buffer buffer)
+        : state_(std::move(state))
+        , buffer_(buffer)
+    {
+    }
+
+    /**
+     * @brief 析构时归还 V4L2 缓冲区。
+     */
+    ~V4l2BufferLease() override
+    {
+        release();
+    }
+
+    V4l2BufferLease(const V4l2BufferLease&) = delete;
+    V4l2BufferLease& operator=(const V4l2BufferLease&) = delete;
+    V4l2BufferLease(V4l2BufferLease&&) = delete;
+    V4l2BufferLease& operator=(V4l2BufferLease&&) = delete;
+
+private:
+    /**
+     * @brief 将租借缓冲区归还给 V4L2 驱动。
+     */
+    void release() noexcept
+    {
+        if (returned_ || !state_ || state_->fd == -1 || !state_->streaming) {
+            returned_ = true;
+            return;
+        }
+
+        // 析构函数不能向外报告错误；失败时只能丢弃错误，后续 poll/DQBUF 会暴露状态。
+        static_cast<void>(xioctl_noexcept(state_->fd, VIDIOC_QBUF, &buffer_));
+        returned_ = true;
+    }
+
+    std::shared_ptr<CameraVideoSource::DeviceState> state_;
+    v4l2_buffer buffer_{};
+    bool returned_{false};
+};
 
 /**
  * @brief 使用摄像头配置构造 V4L2 视频源。
@@ -44,6 +122,7 @@ std::int64_t to_timestamp_ns(const timeval& value)
  */
 CameraVideoSource::CameraVideoSource(CameraConfig config)
     : config_(std::move(config))
+    , device_state_(std::make_shared<DeviceState>())
 {
 }
 
@@ -63,12 +142,7 @@ bool CameraVideoSource::open()
 {
     close();
 
-    if (config_.buffer_mode == "loaned") {
-        last_error_ = "V4L2 loaned buffer mode requires FrameView/FrameLease support; "
-                      "current pipeline supports copy mode only";
-        return false;
-    }
-    if (config_.buffer_mode != "copy") {
+    if (config_.buffer_mode != "copy" && config_.buffer_mode != "loaned") {
         last_error_ = "unsupported V4L2 buffer mode: " + config_.buffer_mode;
         return false;
     }
@@ -79,6 +153,8 @@ bool CameraVideoSource::open()
         set_error_from_errno("open(" + config_.uri + ") failed");
         return false;
     }
+    device_state_->fd = fd_;
+    device_state_->streaming = false;
 
     // 任一初始化阶段失败时都统一走 close，确保 fd 和 mmap 不泄漏。
     if (!configure_device() || !request_and_map_buffers() || !queue_all_buffers() || !start_streaming()) {
@@ -99,6 +175,7 @@ void CameraVideoSource::close() noexcept
     if (fd_ != -1 && streaming_) {
         // 先停止驱动侧流式采集，再回收用户态映射缓冲区。
         auto type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        device_state_->streaming = false;
         ::ioctl(fd_, VIDIOC_STREAMOFF, &type);
         streaming_ = false;
     }
@@ -107,6 +184,7 @@ void CameraVideoSource::close() noexcept
 
     if (fd_ != -1) {
         ::close(fd_);
+        device_state_->fd = -1;
         fd_ = -1;
     }
 }
@@ -155,13 +233,19 @@ std::optional<Frame> CameraVideoSource::read_frame()
     frame.timestamp_ns = to_timestamp_ns(buffer.timestamp);
     frame.bytes_used = bytes_used;
 
-    // 当前实现先把驱动缓冲区复制到 Frame 对象中，后续再考虑零拷贝优化。
-    frame.data.assign(start, start + bytes_used);
+    if (config_.buffer_mode == "loaned") {
+        // loaned 模式不复制载荷，由 Frame 租约控制 QBUF 归还时机。
+        frame.loaned_data = start;
+        frame.loaned_size = bytes_used;
+        frame.payload_lease = std::make_shared<V4l2BufferLease>(device_state_, buffer);
+    } else {
+        frame.data.assign(start, start + bytes_used);
 
-    // 使用完成后必须立即把缓冲区放回驱动队列，供后续帧继续复用。
-    if (xioctl(fd_, VIDIOC_QBUF, &buffer) == -1) {
-        set_error_from_errno("VIDIOC_QBUF failed");
-        return std::nullopt;
+        // copy 模式复制完成后立即把缓冲区放回驱动队列，供后续帧继续复用。
+        if (xioctl(fd_, VIDIOC_QBUF, &buffer) == -1) {
+            set_error_from_errno("VIDIOC_QBUF failed");
+            return std::nullopt;
+        }
     }
 
     return frame;
@@ -324,6 +408,7 @@ bool CameraVideoSource::start_streaming()
     }
 
     streaming_ = true;
+    device_state_->streaming = true;
     return true;
 }
 

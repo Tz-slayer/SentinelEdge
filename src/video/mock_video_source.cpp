@@ -46,18 +46,15 @@ std::optional<Frame> MockVideoSource::read_frame()
     }
 
     // 模拟源不提供真实像素数据，只提供足够驱动流程的帧元信息。
-    return Frame{
-        next_sequence_++,
-        config_.id,
-        config_.width,
-        config_.height,
-        0U,
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count(),
-        0U,
-        {},
-    };
+    Frame frame;
+    frame.sequence = next_sequence_++;
+    frame.camera_id = config_.id;
+    frame.width = config_.width;
+    frame.height = config_.height;
+    frame.timestamp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now().time_since_epoch())
+                             .count();
+    return frame;
 }
 
 /**

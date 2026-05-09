@@ -2,7 +2,7 @@
 
 ## 当前目标
 
-OpenCV 链路已经跑通后，DVPP 第一阶段先实现 `copy` 模式对照链路：
+OpenCV 链路已经跑通后，DVPP 第一阶段先实现 `copy` / `loaned` 两种 V4L2 输入模式下的对照链路：
 
 ```text
 V4L2 MJPEG Frame
@@ -14,9 +14,10 @@ V4L2 MJPEG Frame
   -> AscendCL Detector
 ```
 
-这版没有做零拷贝，也没有把预处理输出直接交给模型 Device 输入。这样做的原因是先让
-DVPP 和 OpenCV 在同一个 pipeline 中可切换、可计时、可回退，便于确认摄像头输入、
-模型尺寸、后处理和日志都没有被一起改坏。
+`loaned` 模式避免了 V4L2 `mmap` 缓冲区到 `Frame::data` 的用户态复制，但当前还没有把
+DVPP 输出直接交给模型 Device 输入。因此它是摄像头输入侧的第一阶段零拷贝，不是完整的
+端到端零拷贝。这样做的原因是先让 DVPP 和 OpenCV 在同一个 pipeline 中可切换、可计时、
+可回退，便于确认摄像头输入、模型尺寸、后处理和日志都没有被一起改坏。
 
 ## 全链路 DVPP 配置
 
@@ -48,6 +49,7 @@ overlay:
 
 - `pipeline.backend: "dvpp"` 当前要求摄像头输入为 `V4L2_PIX_FMT_MJPEG`，因为 DVPP 预处理路径使用 JPEGD 解码。
 - 输出固定支持 `NCHW` + `FP32`，与 OpenCV 预处理链路保持一致。
+- `camera.buffer_mode: "loaned"` 只减少 V4L2 出队后到 pipeline 的帧复制；DVPP 输出到 Host、CPU 侧打包、AscendCL 模型输入拷贝仍然存在。
 - DVPP 预处理只负责 JPEG 解码和缩放；NV12 到 RGB、归一化、NCHW 打包仍在 CPU 侧完成。
 - DVPP 画框链路的解码使用 DVPP，但画框当前在 Host BGR24 缓冲区上完成，不是 DVPP OSD。
 - `mjpeg` 和 `debug_image` 输出最终 JPEG 编码仍复用当前 OpenCV 输出实现。

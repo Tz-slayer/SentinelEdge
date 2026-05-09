@@ -4,6 +4,7 @@
 #include "sentinel/video/video_source.hpp"
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -11,13 +12,15 @@
 
 namespace sentinel {
 
+class V4l2BufferLease;
+
 /**
  * @brief 从本地 V4L2 摄像头设备采集视频帧。
  *
  * 该实现使用 Linux V4L2 流式采集接口，核心流程包括 `mmap`、
- * `poll`、`VIDIOC_DQBUF` 和 `VIDIOC_QBUF`。当前稳定实现支持
- * `buffer_mode: "copy"`；`loaned` 零拷贝模式需要后续 FrameView
- * 生命周期改造完成后再启用。
+ * `poll`、`VIDIOC_DQBUF` 和 `VIDIOC_QBUF`。`buffer_mode: "copy"`
+ * 会复制驱动缓冲区；`buffer_mode: "loaned"` 会把 V4L2 `mmap`
+ * 缓冲区租借给 `Frame`，最后一个 `Frame` 释放时再归还给驱动。
  */
 class CameraVideoSource final : public VideoSource {
 public:
@@ -65,6 +68,8 @@ public:
     std::string_view last_error() const noexcept override;
 
 private:
+    friend class V4l2BufferLease;
+
     /**
      * @brief 一块通过 `mmap` 映射到用户空间的 V4L2 缓冲区。
      */
@@ -72,6 +77,11 @@ private:
         void* start{nullptr};
         std::size_t length{0};
     };
+
+    /**
+     * @brief 供租约对象观察的设备状态。
+     */
+    struct DeviceState;
 
     /**
      * @brief 配置设备的视频格式和采样参数。
@@ -125,6 +135,7 @@ private:
 
     CameraConfig config_;
     std::vector<BufferView> buffers_;
+    std::shared_ptr<DeviceState> device_state_;
     std::string last_error_;
     int fd_{-1};
     int next_sequence_{1};

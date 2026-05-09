@@ -415,11 +415,13 @@ public:
             last_error_ = "DVPP image backend currently supports only MJPEG/JPEG frames";
             return std::nullopt;
         }
-        if (frame.data.empty() || frame.bytes_used == 0U) {
+        const auto* payload = frame.payload_data();
+        const auto payload_size = frame.payload_size();
+        if (payload == nullptr || payload_size == 0U) {
             last_error_ = "input frame is empty";
             return std::nullopt;
         }
-        if (frame.bytes_used > std::numeric_limits<std::uint32_t>::max()) {
+        if (payload_size > std::numeric_limits<std::uint32_t>::max()) {
             last_error_ = "input frame is too large for DVPP JPEGD";
             return std::nullopt;
         }
@@ -427,8 +429,8 @@ public:
         std::uint32_t width = 0;
         std::uint32_t height = 0;
         int32_t components = 0;
-        auto ret = acldvppJpegGetImageInfo(frame.data.data(),
-                                           static_cast<std::uint32_t>(frame.bytes_used),
+        auto ret = acldvppJpegGetImageInfo(payload,
+                                           static_cast<std::uint32_t>(payload_size),
                                            &width,
                                            &height,
                                            &components);
@@ -442,8 +444,8 @@ public:
         }
 
         std::uint32_t decode_size = 0;
-        ret = acldvppJpegPredictDecSize(frame.data.data(),
-                                        static_cast<std::uint32_t>(frame.bytes_used),
+        ret = acldvppJpegPredictDecSize(payload,
+                                        static_cast<std::uint32_t>(payload_size),
                                         PIXEL_FORMAT_YUV_SEMIPLANAR_420,
                                         &decode_size);
         if (!acl_ok(ret)) {
@@ -471,8 +473,8 @@ public:
         }
 
         ret = acldvppJpegDecodeAsync(channel_desc_,
-                                     frame.data.data(),
-                                     static_cast<std::uint32_t>(frame.bytes_used),
+                                     payload,
+                                     static_cast<std::uint32_t>(payload_size),
                                      decode_desc.get(),
                                      stream_);
         if (!acl_ok(ret)) {

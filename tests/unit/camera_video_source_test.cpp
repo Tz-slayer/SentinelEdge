@@ -46,9 +46,9 @@ int main()
 
     config.buffer_mode = "loaned";
     sentinel::CameraVideoSource loaned_source(config);
-    expect(!loaned_source.open(), "loaned buffer mode should fail until FrameView support lands");
-    expect(loaned_source.last_error().find("FrameView") != std::string_view::npos,
-           "loaned buffer mode should explain the missing FrameView contract");
+    expect(!loaned_source.open(), "loaned buffer mode with a missing V4L2 device should fail");
+    expect(loaned_source.last_error().find("open(") != std::string_view::npos,
+           "loaned buffer mode should now reach the V4L2 open path");
 
     loaned_source.close();
     return 0;

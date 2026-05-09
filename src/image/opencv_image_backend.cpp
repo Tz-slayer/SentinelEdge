@@ -14,13 +14,14 @@ namespace sentinel {
 namespace {
 
 /**
- * @brief 判断帧数据是否具有 JPEG 文件头。
- * @param data 原始帧字节。
+ * @brief 判断帧载荷是否具有 JPEG 文件头。
+ * @param data 原始帧字节起始地址。
+ * @param size 原始帧字节数。
  * @return 若前两个字节为 JPEG SOI 标记则返回 `true`。
  */
-bool looks_like_jpeg(const std::vector<std::uint8_t>& data) noexcept
+bool looks_like_jpeg(const std::uint8_t* data, std::size_t size) noexcept
 {
-    return data.size() >= 2U && data[0] == 0xFFU && data[1] == 0xD8U;
+    return data != nullptr && size >= 2U && data[0] == 0xFFU && data[1] == 0xD8U;
 }
 
 /**
@@ -97,9 +98,9 @@ cv::Mat bgr_mat_from_image(const ImageBuffer& image, std::string& error)
 cv::Mat decode_compressed_image(const Frame& frame)
 {
     const cv::Mat encoded(1,
-                          static_cast<int>(frame.data.size()),
+                          static_cast<int>(frame.payload_size()),
                           CV_8UC1,
-                          const_cast<std::uint8_t*>(frame.data.data()));
+                          const_cast<std::uint8_t*>(frame.payload_data()));
     return cv::imdecode(encoded, cv::IMREAD_COLOR);
 }
 
@@ -111,13 +112,15 @@ cv::Mat decode_compressed_image(const Frame& frame)
  */
 cv::Mat decode_frame_to_bgr(const Frame& frame, std::string& error)
 {
-    if (frame.data.empty()) {
+    const auto* payload = frame.payload_data();
+    const auto payload_size = frame.payload_size();
+    if (payload == nullptr || payload_size == 0U) {
         error = "frame data is empty";
         return {};
     }
 
     if (frame.pixel_format == V4L2_PIX_FMT_MJPEG || frame.pixel_format == V4L2_PIX_FMT_JPEG ||
-        looks_like_jpeg(frame.data)) {
+        looks_like_jpeg(payload, payload_size)) {
         auto bgr = decode_compressed_image(frame);
         if (bgr.empty()) {
             error = "cv::imdecode failed for compressed frame";
@@ -133,7 +136,7 @@ cv::Mat decode_frame_to_bgr(const Frame& frame, std::string& error)
     if (frame.pixel_format == V4L2_PIX_FMT_YUYV) {
         const auto required = static_cast<std::size_t>(frame.width) *
                               static_cast<std::size_t>(frame.height) * 2U;
-        if (frame.data.size() < required) {
+        if (payload_size < required) {
             error = "YUYV frame bytes are smaller than width*height*2";
             return {};
         }
@@ -141,7 +144,7 @@ cv::Mat decode_frame_to_bgr(const Frame& frame, std::string& error)
         const cv::Mat yuyv(frame.height,
                            frame.width,
                            CV_8UC2,
-                           const_cast<std::uint8_t*>(frame.data.data()));
+                           const_cast<std::uint8_t*>(payload));
         cv::Mat bgr;
         cv::cvtColor(yuyv, bgr, cv::COLOR_YUV2BGR_YUY2);
         return bgr;
@@ -150,7 +153,7 @@ cv::Mat decode_frame_to_bgr(const Frame& frame, std::string& error)
     if (frame.pixel_format == V4L2_PIX_FMT_RGB24 || frame.pixel_format == V4L2_PIX_FMT_BGR24) {
         const auto required = static_cast<std::size_t>(frame.width) *
                               static_cast<std::size_t>(frame.height) * 3U;
-        if (frame.data.size() < required) {
+        if (payload_size < required) {
             error = "RGB/BGR frame bytes are smaller than width*height*3";
             return {};
         }
@@ -158,7 +161,7 @@ cv::Mat decode_frame_to_bgr(const Frame& frame, std::string& error)
         const cv::Mat raw(frame.height,
                           frame.width,
                           CV_8UC3,
-                          const_cast<std::uint8_t*>(frame.data.data()));
+                          const_cast<std::uint8_t*>(payload));
         if (frame.pixel_format == V4L2_PIX_FMT_BGR24) {
             return raw.clone();
         }
