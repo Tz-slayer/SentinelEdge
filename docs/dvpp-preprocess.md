@@ -16,6 +16,10 @@ V4L2 MJPEG Frame
 缓冲区到 `Frame::data` 的用户态复制；静态 AIPP 模型避免了 CPU 侧 NV12->RGB、归一化、
 NCHW FP32 打包。pipeline 会优先向 AscendCL detector 申请模型输入 Device buffer，
 DVPP VPC 会直接写入该 buffer，detector 执行时跳过输入 Host->Device 拷贝。
+DVPP 预处理器会在 `open()` 后复用 JPEGD 输出 Device buffer、Host fallback 的 VPC 输出
+Device buffer、`acldvppPicDesc` 和 `acldvppResizeConfig`，避免在主循环内按帧创建和销毁这些资源。
+用于 `debug_image` / `mjpeg` 的 DVPP 图像后端也会复用 JPEGD 输出 Device buffer、
+Host NV12 缓冲区和 `acldvppPicDesc`。
 
 ## 全链路 DVPP 配置
 
@@ -47,9 +51,11 @@ overlay:
 
 - `pipeline.backend: "dvpp"` 当前要求摄像头输入为 `V4L2_PIX_FMT_MJPEG`，因为 DVPP 预处理路径使用 JPEGD 解码。
 - DVPP 预处理支持 `NV12` + `UINT8`，用于静态 AIPP OM；也保留 `NCHW` + `FP32` 兼容旧模型。
-- `camera.buffer_mode: "loaned"` 只减少 V4L2 出队后到 pipeline 的帧复制；JPEGD 解码临时 Device buffer 当前仍按帧申请。
+- `camera.buffer_mode: "loaned"` 只减少 V4L2 出队后到 pipeline 的帧复制；V4L2 MJPEG 码流本身仍位于 Host。
 - 使用静态 AIPP OM 时，NV12 到 RGB、归一化等动作由模型内 AIPP 完成，不再由 CPU 打包 NCHW FP32。
 - 静态 AIPP 路径下，DVPP VPC 输出会直接写入 AscendCL 模型输入 Device buffer，避免 `DVPP -> Host -> AscendCL input` 往返拷贝。
+- JPEGD 输出 Device buffer、Host fallback resize buffer、DVPP PicDesc 和 ResizeConfig 已复用，不再按帧申请释放。
+- DVPP 图像后端的调试输出链路已复用 JPEGD buffer、Host NV12 buffer 和 PicDesc。
 - DVPP 画框链路的解码使用 DVPP，但画框当前在 Host BGR24 缓冲区上完成，不是 DVPP OSD。
 - `mjpeg` 和 `debug_image` 输出最终 JPEG 编码仍复用当前 OpenCV 输出实现。
 
@@ -131,5 +137,5 @@ BACKENDS="opencv dvpp" SINKS="none" FRAMES=300 \
 
 1. 先在开发板确认 `pipeline.backend: "dvpp"` 能跑完整 pipeline，并在 debug 日志中看到 `memory=device`。
 2. 观察 `preprocess_ms`、`detect_ms`、CPU 占用和端到端帧率，确认 Device buffer 直写路径对实际开发板是否有收益。
-3. 如果链路稳定，再复用 JPEGD/VPC 临时 Device buffer 和 DVPP 描述对象，减少按帧申请释放。
-4. 最后再考虑 DVPP OSD/画框或 MediaMTX 推流，不和本阶段混在一起。
+3. 如果链路稳定，再考虑模型输出 Device 侧后处理、DVPP OSD 或硬件编码，减少输出可视化链路的 Host 侧处理。
+4. 最后再考虑 MediaMTX 推流，不和本阶段混在一起。

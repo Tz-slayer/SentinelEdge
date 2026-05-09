@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <utility>
 
 #include <linux/videodev2.h>
@@ -143,6 +144,20 @@ public:
         }
         size_ = size;
         return true;
+    }
+
+    /**
+     * @brief 确保当前 Device 内存容量至少为指定大小。
+     * @param size 需要的最小字节数。
+     * @param error 失败时写入错误文本。
+     * @return 成功返回 `true`。
+     */
+    bool ensure_size(std::size_t size, std::string& error)
+    {
+        if (data_ != nullptr && size_ >= size) {
+            return true;
+        }
+        return allocate(size, error);
     }
 
     /**
@@ -321,6 +336,10 @@ Rect detection_to_pixel_rect(const Detection& detection, int image_width, int im
 
 /**
  * @brief DVPP 图像处理真实实现。
+ *
+ * 该实现会复用 JPEGD 输出 Device buffer、Host NV12 缓冲区和图片描述。
+ * 调试输出链路最终仍需要 Host BGR24 图像用于画框和 JPEG 编码，但不会
+ * 在每帧重复创建 DVPP 基础资源。
  */
 class DvppImageBackend::Impl {
 public:
@@ -366,6 +385,14 @@ public:
             return false;
         }
         channel_created_ = true;
+
+        decode_desc_ = std::make_unique<DvppPicDesc>();
+        if (!decode_desc_->valid()) {
+            last_error_ = "failed to create reusable DVPP decode descriptor";
+            close();
+            return false;
+        }
+
         last_error_.clear();
         return true;
 #else
@@ -383,6 +410,9 @@ public:
         if (stream_ != nullptr) {
             aclrtSynchronizeStream(stream_);
         }
+        decode_desc_.reset();
+        decode_output_.reset();
+        host_nv12_.clear();
         if (channel_created_) {
             acldvppDestroyChannel(channel_desc_);
             channel_created_ = false;
@@ -453,17 +483,15 @@ public:
             return std::nullopt;
         }
 
-        DeviceMemory decode_output;
-        if (!decode_output.allocate(decode_size, last_error_)) {
+        if (!decode_output_.ensure_size(decode_size, last_error_)) {
             return std::nullopt;
         }
 
         const auto width_stride = align_up(width, 128U);
         const auto height_stride = align_up(height, 16U);
-        DvppPicDesc decode_desc;
-        if (!decode_desc.valid() ||
-            !setup_pic_desc(decode_desc.get(),
-                            decode_output.data(),
+        if (decode_desc_ == nullptr || !decode_desc_->valid() ||
+            !setup_pic_desc(decode_desc_->get(),
+                            decode_output_.data(),
                             decode_size,
                             width,
                             height,
@@ -475,7 +503,7 @@ public:
         ret = acldvppJpegDecodeAsync(channel_desc_,
                                      payload,
                                      static_cast<std::uint32_t>(payload_size),
-                                     decode_desc.get(),
+                                     decode_desc_->get(),
                                      stream_);
         if (!acl_ok(ret)) {
             last_error_ = make_acl_error("acldvppJpegDecodeAsync", static_cast<int>(ret));
@@ -487,11 +515,12 @@ public:
             return std::nullopt;
         }
 
-        std::vector<std::uint8_t> host_nv12(yuv420sp_size(width_stride, height_stride));
-        ret = aclrtMemcpy(host_nv12.data(),
-                          host_nv12.size(),
-                          decode_output.data(),
-                          decode_output.size(),
+        const auto host_nv12_size = yuv420sp_size(width_stride, height_stride);
+        host_nv12_.resize(host_nv12_size);
+        ret = aclrtMemcpy(host_nv12_.data(),
+                          host_nv12_.size(),
+                          decode_output_.data(),
+                          decode_size,
                           ACL_MEMCPY_DEVICE_TO_HOST);
         if (!acl_ok(ret)) {
             last_error_ = make_acl_error("aclrtMemcpy(decode_output)", static_cast<int>(ret));
@@ -499,7 +528,7 @@ public:
         }
 
         last_error_.clear();
-        return nv12_to_bgr24(host_nv12,
+        return nv12_to_bgr24(host_nv12_,
                              static_cast<int>(width),
                              static_cast<int>(height),
                              width_stride,
@@ -568,6 +597,9 @@ private:
     aclrtStream stream_{nullptr};
     acldvppChannelDesc* channel_desc_{nullptr};
     bool channel_created_{false};
+    DeviceMemory decode_output_;
+    std::vector<std::uint8_t> host_nv12_;
+    std::unique_ptr<DvppPicDesc> decode_desc_;
 #endif
 };
 

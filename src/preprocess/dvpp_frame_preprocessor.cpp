@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <string_view>
 #include <utility>
 
@@ -184,6 +185,23 @@ public:
     }
 
     /**
+     * @brief 确保当前 Device 内存容量至少为指定大小。
+     * @param size 需要的最小字节数。
+     * @param error 失败时写入错误文本。
+     * @return 成功返回 `true`。
+     *
+     * 该函数用于按帧处理中的缓冲区复用。已有容量足够时不会重新
+     * 调用 `aclrtMalloc`，从而减少 DVPP 主链路上的内存申请释放成本。
+     */
+    bool ensure_size(std::size_t size, std::string& error)
+    {
+        if (data_ != nullptr && size_ >= size) {
+            return true;
+        }
+        return allocate(size, error);
+    }
+
+    /**
      * @brief 释放当前 Device 内存。
      */
     void reset() noexcept
@@ -332,6 +350,10 @@ void synchronize_stream_before_releasing_async_buffers(aclrtStream stream) noexc
 
 /**
  * @brief DVPP 预处理真实实现。
+ *
+ * 该实现持有可复用的 JPEGD 输出 Device buffer、Host fallback 的 VPC 输出
+ * Device buffer、DVPP 图片描述和 resize 配置。`process_into()` 的静态 AIPP
+ * 路径会把 VPC 输出直接写入 AscendCL 模型输入 Device buffer。
  */
 class DvppFramePreprocessor::Impl {
 public:
@@ -399,6 +421,18 @@ public:
             return false;
         }
         channel_created_ = true;
+
+        decode_desc_ = std::make_unique<DvppPicDesc>();
+        host_resize_desc_ = std::make_unique<DvppPicDesc>();
+        device_resize_desc_ = std::make_unique<DvppPicDesc>();
+        resize_config_ = std::make_unique<DvppResizeConfig>();
+        if (!decode_desc_->valid() || !host_resize_desc_->valid() ||
+            !device_resize_desc_->valid() || !resize_config_->valid()) {
+            last_error_ = "failed to create reusable DVPP descriptors";
+            close();
+            return false;
+        }
+
         last_error_.clear();
         return true;
 #else
@@ -416,6 +450,12 @@ public:
         if (stream_ != nullptr) {
             aclrtSynchronizeStream(stream_);
         }
+        decode_desc_.reset();
+        host_resize_desc_.reset();
+        device_resize_desc_.reset();
+        resize_config_.reset();
+        decode_output_.reset();
+        host_resize_output_.reset();
         if (channel_created_) {
             acldvppDestroyChannel(channel_desc_);
             channel_created_ = false;
@@ -486,17 +526,15 @@ public:
             return std::nullopt;
         }
 
-        DeviceMemory decode_output;
-        if (!decode_output.allocate(decode_size, last_error_)) {
+        if (!decode_output_.ensure_size(decode_size, last_error_)) {
             return std::nullopt;
         }
 
         const auto decode_width_stride = align_up(source_width, 128U);
         const auto decode_height_stride = align_up(source_height, 16U);
-        DvppPicDesc decode_desc;
-        if (!decode_desc.valid() ||
-            !setup_pic_desc(decode_desc.get(),
-                            decode_output.data(),
+        if (decode_desc_ == nullptr || !decode_desc_->valid() ||
+            !setup_pic_desc(decode_desc_->get(),
+                            decode_output_.data(),
                             decode_size,
                             source_width,
                             source_height,
@@ -511,15 +549,13 @@ public:
         const auto output_height_stride = align_up(output_height, 2U);
         const auto resize_size = yuv420sp_size(output_width_stride, output_height_stride);
 
-        DeviceMemory resize_output;
-        if (!resize_output.allocate(resize_size, last_error_)) {
+        if (!host_resize_output_.ensure_size(resize_size, last_error_)) {
             return std::nullopt;
         }
 
-        DvppPicDesc resize_desc;
-        if (!resize_desc.valid() ||
-            !setup_pic_desc(resize_desc.get(),
-                            resize_output.data(),
+        if (host_resize_desc_ == nullptr || !host_resize_desc_->valid() ||
+            !setup_pic_desc(host_resize_desc_->get(),
+                            host_resize_output_.data(),
                             resize_size,
                             output_width,
                             output_height,
@@ -528,8 +564,7 @@ public:
             return std::nullopt;
         }
 
-        DvppResizeConfig resize_config;
-        if (!resize_config.valid()) {
+        if (resize_config_ == nullptr || !resize_config_->valid()) {
             last_error_ = "acldvppCreateResizeConfig failed";
             return std::nullopt;
         }
@@ -538,7 +573,7 @@ public:
         ret = acldvppJpegDecodeAsync(channel_desc_,
                                      payload,
                                      static_cast<std::uint32_t>(payload_size),
-                                     decode_desc.get(),
+                                     decode_desc_->get(),
                                      stream_);
         if (!acl_ok(ret)) {
             last_error_ = make_acl_error("acldvppJpegDecodeAsync", static_cast<int>(ret));
@@ -546,9 +581,9 @@ public:
         }
 
         ret = acldvppVpcResizeAsync(channel_desc_,
-                                    decode_desc.get(),
-                                    resize_desc.get(),
-                                    resize_config.get(),
+                                    decode_desc_->get(),
+                                    host_resize_desc_->get(),
+                                    resize_config_->get(),
                                     stream_);
         if (!acl_ok(ret)) {
             last_error_ = make_acl_error("acldvppVpcResizeAsync", static_cast<int>(ret));
@@ -565,8 +600,8 @@ public:
         std::vector<std::uint8_t> host_nv12(resize_size);
         ret = aclrtMemcpy(host_nv12.data(),
                           host_nv12.size(),
-                          resize_output.data(),
-                          resize_output.size(),
+                          host_resize_output_.data(),
+                          resize_size,
                           ACL_MEMCPY_DEVICE_TO_HOST);
         if (!acl_ok(ret)) {
             last_error_ = make_acl_error("aclrtMemcpy(resize_output)", static_cast<int>(ret));
@@ -664,17 +699,15 @@ public:
             return std::nullopt;
         }
 
-        DeviceMemory decode_output;
-        if (!decode_output.allocate(decode_size, last_error_)) {
+        if (!decode_output_.ensure_size(decode_size, last_error_)) {
             return std::nullopt;
         }
 
         const auto decode_width_stride = align_up(source_width, 128U);
         const auto decode_height_stride = align_up(source_height, 16U);
-        DvppPicDesc decode_desc;
-        if (!decode_desc.valid() ||
-            !setup_pic_desc(decode_desc.get(),
-                            decode_output.data(),
+        if (decode_desc_ == nullptr || !decode_desc_->valid() ||
+            !setup_pic_desc(decode_desc_->get(),
+                            decode_output_.data(),
                             decode_size,
                             source_width,
                             source_height,
@@ -696,9 +729,8 @@ public:
             return std::nullopt;
         }
 
-        DvppPicDesc resize_desc;
-        if (!resize_desc.valid() ||
-            !setup_pic_desc(resize_desc.get(),
+        if (device_resize_desc_ == nullptr || !device_resize_desc_->valid() ||
+            !setup_pic_desc(device_resize_desc_->get(),
                             target.device_data,
                             static_cast<std::uint32_t>(target.device_bytes),
                             output_width,
@@ -708,8 +740,7 @@ public:
             return std::nullopt;
         }
 
-        DvppResizeConfig resize_config;
-        if (!resize_config.valid()) {
+        if (resize_config_ == nullptr || !resize_config_->valid()) {
             last_error_ = "acldvppCreateResizeConfig failed";
             return std::nullopt;
         }
@@ -718,7 +749,7 @@ public:
         ret = acldvppJpegDecodeAsync(channel_desc_,
                                      payload,
                                      static_cast<std::uint32_t>(payload_size),
-                                     decode_desc.get(),
+                                     decode_desc_->get(),
                                      stream_);
         if (!acl_ok(ret)) {
             last_error_ = make_acl_error("acldvppJpegDecodeAsync", static_cast<int>(ret));
@@ -726,9 +757,9 @@ public:
         }
 
         ret = acldvppVpcResizeAsync(channel_desc_,
-                                    decode_desc.get(),
-                                    resize_desc.get(),
-                                    resize_config.get(),
+                                    decode_desc_->get(),
+                                    device_resize_desc_->get(),
+                                    resize_config_->get(),
                                     stream_);
         if (!acl_ok(ret)) {
             last_error_ = make_acl_error("acldvppVpcResizeAsync", static_cast<int>(ret));
@@ -815,6 +846,12 @@ private:
     aclrtStream stream_{nullptr};
     acldvppChannelDesc* channel_desc_{nullptr};
     bool channel_created_{false};
+    DeviceMemory decode_output_;
+    DeviceMemory host_resize_output_;
+    std::unique_ptr<DvppPicDesc> decode_desc_;
+    std::unique_ptr<DvppPicDesc> host_resize_desc_;
+    std::unique_ptr<DvppPicDesc> device_resize_desc_;
+    std::unique_ptr<DvppResizeConfig> resize_config_;
 #endif
 };
 
