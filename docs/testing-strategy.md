@@ -182,6 +182,9 @@ config/perf/pipeline-matrix.conf
 ```
 
 当前矩阵测试只允许 `BACKENDS` 和 `BUFFER_MODES` 形成组合，输出通道固定为 `none`。
+每个 backend 使用自己的模型和 preprocess profile：OpenCV 使用普通 NCHW/FP32 OM，
+DVPP 使用静态 AIPP NV12/UINT8 OM。这个测试用于比较两套各自合理链路的性能差距，
+不是强制使用同一个模型输入格式。
 确认后运行：
 
 ```bash

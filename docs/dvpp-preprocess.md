@@ -184,7 +184,7 @@ BACKEND=dvpp SINK=none FRAMES=300 \
 config/perf/pipeline-matrix.conf
 ```
 
-当前矩阵测试只支持这些变量：
+当前矩阵测试支持这些变量：
 
 - `BACKENDS`：例如 `("dvpp")` 或 `("opencv" "dvpp")`
 - `BUFFER_MODES`：例如 `("loaned" "copy")`
@@ -193,6 +193,14 @@ config/perf/pipeline-matrix.conf
 - `WARMUP_FRAMES`
 
 输出通道不作为变量，脚本固定写入 `output.video_sink: "none"`，用于只观察 pipeline 主链路成本。
+每个 backend 会绑定自己的最优 profile：
+
+- `opencv`：普通 NCHW/FP32 OM，`preprocess.output_layout=NCHW`，`preprocess.output_dtype=FP32`，`normalize=true`
+- `dvpp`：静态 AIPP NV12 OM，`preprocess.output_layout=NV12`，`preprocess.output_dtype=UINT8`，`normalize=false`
+
+因此这个矩阵比较的是“OpenCV 最优软件链路”和“DVPP + AIPP 最优硬件链路”的端到端差距，不要求二者使用同一个 `.om` 文件。
+运行前需要确认部署包中同时存在 `models/yolo/yolo26n.om` 和
+`models/yolo/yolo26n_aipp_nv12.om`；脚本会在每组测试开始前检查对应模型文件。
 
 确认配置后运行：
 

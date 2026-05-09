@@ -20,6 +20,14 @@ CSV_DIR="${CSV_DIR:-perf/matrix}"
 LOG_DIR="${LOG_DIR:-data/dev/perf/matrix}"
 REPORT_PATH="${REPORT_PATH:-data/dev/perf/pipeline-matrix-report.md}"
 REPORT_TITLE="${REPORT_TITLE:-SentinelEdge Pipeline 性能测试报告}"
+OPENCV_MODEL_PATH="${OPENCV_MODEL_PATH:-models/yolo/yolo26n.om}"
+OPENCV_OUTPUT_LAYOUT="${OPENCV_OUTPUT_LAYOUT:-NCHW}"
+OPENCV_OUTPUT_DTYPE="${OPENCV_OUTPUT_DTYPE:-FP32}"
+OPENCV_NORMALIZE="${OPENCV_NORMALIZE:-true}"
+DVPP_MODEL_PATH="${DVPP_MODEL_PATH:-models/yolo/yolo26n_aipp_nv12.om}"
+DVPP_OUTPUT_LAYOUT="${DVPP_OUTPUT_LAYOUT:-NV12}"
+DVPP_OUTPUT_DTYPE="${DVPP_OUTPUT_DTYPE:-UINT8}"
+DVPP_NORMALIZE="${DVPP_NORMALIZE:-false}"
 
 if [[ ${#BACKENDS[@]} -eq 0 ]]; then
     printf 'BACKENDS must not be empty in %s\n' "${CONFIG_PATH}" >&2
@@ -76,6 +84,62 @@ for buffer_mode in "${BUFFER_MODES[@]}"; do
     esac
 done
 
+resolve_model_file() {
+    local model_path="$1"
+    if [[ "${model_path}" = /* ]]; then
+        printf '%s\n' "${model_path}"
+    else
+        printf '%s/%s\n' "${PACKAGE_DIR}" "${model_path}"
+    fi
+}
+
+require_model_file() {
+    local model_path="$1"
+    local model_file
+    model_file="$(resolve_model_file "${model_path}")"
+    if [[ ! -f "${model_file}" ]]; then
+        printf 'missing model for matrix profile: %s\n' "${model_file}" >&2
+        exit 1
+    fi
+}
+
+apply_backend_profile() {
+    local backend="$1"
+    local model_path
+    local output_layout
+    local output_dtype
+    local normalize
+
+    case "${backend}" in
+        opencv)
+            model_path="${OPENCV_MODEL_PATH}"
+            output_layout="${OPENCV_OUTPUT_LAYOUT}"
+            output_dtype="${OPENCV_OUTPUT_DTYPE}"
+            normalize="${OPENCV_NORMALIZE}"
+            ;;
+        dvpp)
+            model_path="${DVPP_MODEL_PATH}"
+            output_layout="${DVPP_OUTPUT_LAYOUT}"
+            output_dtype="${DVPP_OUTPUT_DTYPE}"
+            normalize="${DVPP_NORMALIZE}"
+            ;;
+        *)
+            printf 'unsupported backend profile: %s\n' "${backend}" >&2
+            exit 1
+            ;;
+    esac
+
+    require_model_file "${model_path}"
+    perl -0pi -e "s|(inference:\\n(?:\\s+.*\\n)*?\\s+model_path: )\"[^\"]*\"|\${1}\"${model_path}\"|" \
+        "${SENTINEL_CONFIG}"
+    perl -0pi -e "s|(preprocess:\\n(?:\\s+.*\\n)*?\\s+output_layout: )\"[^\"]*\"|\${1}\"${output_layout}\"|" \
+        "${SENTINEL_CONFIG}"
+    perl -0pi -e "s|(preprocess:\\n(?:\\s+.*\\n)*?\\s+output_dtype: )\"[^\"]*\"|\${1}\"${output_dtype}\"|" \
+        "${SENTINEL_CONFIG}"
+    perl -0pi -e "s#(preprocess:\\n(?:\\s+.*\\n)*?\\s+normalize: )(?:true|false)#\${1}${normalize}#" \
+        "${SENTINEL_CONFIG}"
+}
+
 mkdir -p "${LOG_ROOT}" "${CSV_ROOT}"
 cp "${SENTINEL_CONFIG}" "${SENTINEL_BACKUP}"
 cp "${CAMERA_CONFIG}" "${CAMERA_BACKUP}"
@@ -97,6 +161,7 @@ for backend in "${BACKENDS[@]}"; do
 
         perl -0pi -e "s/(pipeline:\\n\\s+backend: )\"(?:opencv|dvpp)\"/\${1}\"${backend}\"/" \
             "${SENTINEL_CONFIG}"
+        apply_backend_profile "${backend}"
         perl -0pi -e "s/(performance:\\n\\s+enabled: )(?:true|false)/\${1}true/" \
             "${SENTINEL_CONFIG}"
         sed -i \
