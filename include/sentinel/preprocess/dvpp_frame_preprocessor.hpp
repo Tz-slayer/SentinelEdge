@@ -46,6 +46,14 @@ public:
     std::optional<TensorBuffer> process(const Frame& frame) override;
 
     /**
+     * @brief 将 MJPEG 帧通过 DVPP 直接写入目标张量。
+     * @param frame 视频源输出的原始帧。
+     * @param target 目标张量；静态 AIPP 路径下可为 AscendCL Device 输入缓冲区。
+     * @return 成功返回目标张量；失败返回空。
+     */
+    std::optional<TensorBuffer> process_into(const Frame& frame, TensorBuffer target) override;
+
+    /**
      * @brief 返回预处理策略类型标识。
      * @return 固定返回 `"dvpp"`。
      */

@@ -143,7 +143,30 @@ std::string make_tensor_debug_message(const TensorBuffer& tensor)
            " shape=" + shape_to_string(tensor.shape) +
            " layout=" + tensor.layout +
            " dtype=" + tensor.dtype +
-           " bytes=" + std::to_string(tensor.data.size());
+           " memory=" + (tensor.is_device() ? "device" : "host") +
+           " bytes=" + std::to_string(tensor.byte_size());
+}
+
+/**
+ * @brief 根据预处理配置生成目标张量元数据。
+ * @param config 预处理配置。
+ * @param frame 当前视频帧。
+ * @return 只包含 shape、layout、dtype 和来源帧信息的张量元数据。
+ */
+TensorBuffer make_preprocess_target_metadata(const PreprocessConfig& config, const Frame& frame)
+{
+    TensorBuffer metadata;
+    metadata.layout = config.output_layout;
+    metadata.dtype = config.output_dtype;
+    metadata.frame_sequence = frame.sequence;
+    metadata.camera_id = frame.camera_id;
+
+    if (config.output_layout == "NV12" && config.output_dtype == "UINT8") {
+        metadata.shape = {1, 1, config.output_height, config.output_width};
+    } else {
+        metadata.shape = {1, 3, config.output_height, config.output_width};
+    }
+    return metadata;
 }
 
 /**
@@ -387,7 +410,11 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
         if (preprocessor) {
             // 真实推理路径先将摄像头帧转换成模型输入张量，再交给检测器。
             const auto preprocess_start = Clock::now();
-            auto processed = preprocessor->process(*frame);
+            const auto target_metadata = make_preprocess_target_metadata(config.preprocess, *frame);
+            auto target_tensor = detector->mutable_input_tensor(target_metadata);
+            auto processed = target_tensor.has_value()
+                                 ? preprocessor->process_into(*frame, std::move(*target_tensor))
+                                 : preprocessor->process(*frame);
             preprocess_ms = elapsed_ms_since(preprocess_start);
             if (!processed.has_value()) {
                 logger.error("frame preprocessor failed: " +

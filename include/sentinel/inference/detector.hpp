@@ -2,6 +2,7 @@
 
 #include "sentinel/common/types.hpp"
 
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -43,6 +44,21 @@ public:
      * @return 当前帧的检测结果列表；失败时返回空列表并更新 `last_error()`。
      */
     virtual std::vector<Detection> detect(const TensorBuffer& tensor) = 0;
+
+    /**
+     * @brief 尝试获取检测器自有的可写模型输入缓冲区。
+     * @param metadata 预处理阶段需要保留的张量元数据。
+     * @return 支持外部写入时返回 Device 张量视图；否则返回空。
+     *
+     * 该接口用于 DVPP 等硬件预处理直接写入模型输入 Device buffer，
+     * 避免 `Device -> Host -> Device` 往返拷贝。默认实现返回空，表示
+     * 检测器不支持该优化路径。
+     */
+    virtual std::optional<TensorBuffer> mutable_input_tensor(const TensorBuffer& metadata)
+    {
+        static_cast<void>(metadata);
+        return std::nullopt;
+    }
 
     /**
      * @brief 返回检测器后端类型标识。

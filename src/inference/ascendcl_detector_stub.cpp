@@ -126,6 +126,17 @@ std::vector<Detection> AscendClDetector::detect(const TensorBuffer& tensor)
 }
 
 /**
+ * @brief 占位实现不暴露模型输入缓冲区。
+ * @param metadata 预处理阶段生成的张量元数据。
+ * @return 固定返回空。
+ */
+std::optional<TensorBuffer> AscendClDetector::mutable_input_tensor(const TensorBuffer& metadata)
+{
+    static_cast<void>(metadata);
+    return std::nullopt;
+}
+
+/**
  * @brief 返回检测器后端类型。
  * @return 固定返回 `"ascendcl"`。
  */

@@ -4,6 +4,7 @@
 #include "sentinel/inference/detector.hpp"
 
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -47,6 +48,13 @@ public:
      * @return 成功返回后处理后的检测结果列表；失败返回空列表。
      */
     std::vector<Detection> detect(const TensorBuffer& tensor) override;
+
+    /**
+     * @brief 返回 AscendCL 模型输入 Device buffer 视图。
+     * @param metadata 预处理阶段生成的张量元数据。
+     * @return 成功返回 Device 张量视图；当前模型输入不满足条件时返回空。
+     */
+    std::optional<TensorBuffer> mutable_input_tensor(const TensorBuffer& metadata) override;
 
     /**
      * @brief 返回检测器后端类型。

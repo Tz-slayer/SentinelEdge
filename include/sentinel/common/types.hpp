@@ -262,19 +262,50 @@ struct ImageBuffer {
 };
 
 /**
+ * @brief 张量缓冲区所在内存位置。
+ */
+enum class TensorMemoryLocation {
+    /** @brief Host 侧普通内存，通常由 `std::vector<std::uint8_t>` 持有。 */
+    kHost,
+    /** @brief Ascend Device 侧内存，生命周期由推理后端或硬件处理后端持有。 */
+    kDevice,
+};
+
+/**
  * @brief 模型输入张量及其来源帧元数据。
  *
- * `data` 按 `dtype` 和 `layout` 描述的格式存放原始字节。对于 AscendCL
- * 推理后端，该字节流会直接拷贝到 Device 输入缓冲区，因此预处理策略必须
- * 保证尺寸、布局和数据类型与 `.om` 模型输入一致。
+ * `data` 按 `dtype` 和 `layout` 描述的格式存放 Host 原始字节。
+ * `device_data` 用于描述已经位于 Device 侧的模型输入缓冲区。预处理策略
+ * 必须保证尺寸、布局和数据类型与 `.om` 模型输入一致。
  */
 struct TensorBuffer {
+    TensorMemoryLocation memory_location{TensorMemoryLocation::kHost};
     std::vector<std::uint8_t> data;
+    void* device_data{nullptr};
+    std::size_t device_bytes{0};
     std::vector<int> shape;
     std::string layout;
     std::string dtype;
     int frame_sequence{0};
     std::string camera_id;
+
+    /**
+     * @brief 返回张量有效字节数。
+     * @return Host 张量返回 `data.size()`，Device 张量返回 `device_bytes`。
+     */
+    std::size_t byte_size() const noexcept
+    {
+        return memory_location == TensorMemoryLocation::kDevice ? device_bytes : data.size();
+    }
+
+    /**
+     * @brief 判断张量是否位于 Device 内存。
+     * @return Device 张量返回 `true`。
+     */
+    bool is_device() const noexcept
+    {
+        return memory_location == TensorMemoryLocation::kDevice;
+    }
 };
 
 /**

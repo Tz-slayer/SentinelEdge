@@ -46,6 +46,21 @@ public:
     virtual std::optional<TensorBuffer> process(const Frame& frame) = 0;
 
     /**
+     * @brief 将一帧视频数据转换到调用方提供的目标张量。
+     * @param frame 视频源输出的原始帧。
+     * @param target 目标张量缓冲区，通常是推理后端暴露的 Device 输入。
+     * @return 成功返回已写入的张量；失败返回空并更新 `last_error()`。
+     *
+     * 默认实现忽略目标缓冲区并回退到 `process()`，保证 OpenCV 和 mock
+     * 路径不需要立即支持 Device 写入。
+     */
+    virtual std::optional<TensorBuffer> process_into(const Frame& frame, TensorBuffer target)
+    {
+        static_cast<void>(target);
+        return process(frame);
+    }
+
+    /**
      * @brief 返回预处理策略类型标识。
      * @return 例如 `"opencv"` 或 `"dvpp"` 的稳定字符串。
      */

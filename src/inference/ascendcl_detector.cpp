@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -183,23 +184,44 @@ public:
             return {};
         }
 
-        if (tensor.data.size() != input_buffers_.front().size) {
+        if (tensor.byte_size() != input_buffers_.front().size) {
             last_error_ = "tensor input bytes mismatch: expected " +
                           std::to_string(input_buffers_.front().size) + ", got " +
-                          std::to_string(tensor.data.size());
+                          std::to_string(tensor.byte_size());
             debug_info_ = "detect failed before execute: " + last_error_;
             return {};
         }
 
-        auto ret = aclrtMemcpy(input_buffers_.front().data,
-                               input_buffers_.front().size,
-                               tensor.data.data(),
-                               tensor.data.size(),
-                               ACL_MEMCPY_HOST_TO_DEVICE);
-        if (!acl_ok(ret)) {
-            set_error("aclrtMemcpy(input)", ret);
-            debug_info_ = "detect failed while copying input: " + last_error_;
-            return {};
+        auto ret = ACL_SUCCESS;
+        if (tensor.is_device()) {
+            if (tensor.device_data == nullptr) {
+                last_error_ = "device tensor input pointer is null";
+                debug_info_ = "detect failed before execute: " + last_error_;
+                return {};
+            }
+            if (tensor.device_data != input_buffers_.front().data) {
+                ret = aclrtMemcpy(input_buffers_.front().data,
+                                  input_buffers_.front().size,
+                                  tensor.device_data,
+                                  tensor.device_bytes,
+                                  ACL_MEMCPY_DEVICE_TO_DEVICE);
+                if (!acl_ok(ret)) {
+                    set_error("aclrtMemcpy(input device-to-device)", ret);
+                    debug_info_ = "detect failed while copying device input: " + last_error_;
+                    return {};
+                }
+            }
+        } else {
+            ret = aclrtMemcpy(input_buffers_.front().data,
+                              input_buffers_.front().size,
+                              tensor.data.data(),
+                              tensor.data.size(),
+                              ACL_MEMCPY_HOST_TO_DEVICE);
+            if (!acl_ok(ret)) {
+                set_error("aclrtMemcpy(input)", ret);
+                debug_info_ = "detect failed while copying input: " + last_error_;
+                return {};
+            }
         }
 
         ret = aclmdlExecute(model_id_, input_dataset_, output_dataset_);
@@ -252,6 +274,26 @@ public:
     }
 
     /**
+     * @brief 返回模型输入 Device buffer 视图。
+     * @param metadata 预处理阶段保留的张量元数据。
+     * @return 单输入模型返回 Device 张量视图，否则返回空。
+     */
+    std::optional<TensorBuffer> mutable_input_tensor(const TensorBuffer& metadata)
+    {
+        if (input_buffers_.size() != 1U || input_buffers_.front().data == nullptr ||
+            input_buffers_.front().size == 0U) {
+            return std::nullopt;
+        }
+
+        TensorBuffer tensor = metadata;
+        tensor.memory_location = TensorMemoryLocation::kDevice;
+        tensor.data.clear();
+        tensor.device_data = input_buffers_.front().data;
+        tensor.device_bytes = input_buffers_.front().size;
+        return tensor;
+    }
+
+    /**
      * @brief 返回最近一次错误文本。
      * @return 错误文本。
      */
@@ -280,7 +322,8 @@ private:
         std::string summary = "ascendcl inference frame_sequence=" +
                               std::to_string(tensor.frame_sequence) +
                               " camera_id=" + tensor.camera_id +
-                              " input_bytes=" + std::to_string(tensor.data.size()) +
+                              " input_bytes=" + std::to_string(tensor.byte_size()) +
+                              " input_memory=" + (tensor.is_device() ? "device" : "host") +
                               " outputs=" + std::to_string(raw_outputs_.size());
 
         for (std::size_t index = 0; index < raw_outputs_.size(); ++index) {
@@ -462,11 +505,21 @@ void AscendClDetector::close() noexcept
 /**
  * @brief 执行一次 AscendCL 推理。
  * @param tensor 预处理后的模型输入张量。
- * @return 当前阶段暂不解析 YOLO 输出，成功推理后返回空列表。
+ * @return 成功返回后处理后的检测结果列表；失败返回空列表。
  */
 std::vector<Detection> AscendClDetector::detect(const TensorBuffer& tensor)
 {
     return impl_->detect(tensor);
+}
+
+/**
+ * @brief 返回 AscendCL 模型输入 Device buffer 视图。
+ * @param metadata 预处理阶段生成的张量元数据。
+ * @return 成功返回 Device 张量视图；当前模型输入不满足条件时返回空。
+ */
+std::optional<TensorBuffer> AscendClDetector::mutable_input_tensor(const TensorBuffer& metadata)
+{
+    return impl_->mutable_input_tensor(metadata);
 }
 
 /**

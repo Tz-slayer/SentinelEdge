@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <string_view>
 #include <utility>
 
 #include <linux/videodev2.h>
@@ -265,6 +266,66 @@ private:
     acldvppPicDesc* desc_{nullptr};
 };
 
+/**
+ * @brief DVPP 缩放配置 RAII 包装。
+ */
+class DvppResizeConfig {
+public:
+    /**
+     * @brief 创建 DVPP 缩放配置。
+     */
+    DvppResizeConfig()
+        : config_(acldvppCreateResizeConfig())
+    {
+    }
+
+    /**
+     * @brief 销毁 DVPP 缩放配置。
+     */
+    ~DvppResizeConfig()
+    {
+        if (config_ != nullptr) {
+            acldvppDestroyResizeConfig(config_);
+        }
+    }
+
+    DvppResizeConfig(const DvppResizeConfig&) = delete;
+    DvppResizeConfig& operator=(const DvppResizeConfig&) = delete;
+
+    /**
+     * @brief 判断缩放配置是否创建成功。
+     * @return 成功返回 `true`。
+     */
+    bool valid() const noexcept
+    {
+        return config_ != nullptr;
+    }
+
+    /**
+     * @brief 返回底层 DVPP 缩放配置。
+     * @return 缩放配置指针。
+     */
+    acldvppResizeConfig* get() const noexcept
+    {
+        return config_;
+    }
+
+private:
+    acldvppResizeConfig* config_{nullptr};
+};
+
+/**
+ * @brief 在释放异步任务关联缓冲区前等待 stream 清空。
+ * @param stream DVPP 异步任务使用的 AscendCL stream。
+ * @return 无返回值；清理路径不覆盖主错误信息。
+ */
+void synchronize_stream_before_releasing_async_buffers(aclrtStream stream) noexcept
+{
+    if (stream != nullptr) {
+        static_cast<void>(aclrtSynchronizeStream(stream));
+    }
+}
+
 #endif
 
 } // namespace
@@ -444,16 +505,6 @@ public:
             return std::nullopt;
         }
 
-        ret = acldvppJpegDecodeAsync(channel_desc_,
-                                     payload,
-                                     static_cast<std::uint32_t>(payload_size),
-                                     decode_desc.get(),
-                                     stream_);
-        if (!acl_ok(ret)) {
-            last_error_ = make_acl_error("acldvppJpegDecodeAsync", static_cast<int>(ret));
-            return std::nullopt;
-        }
-
         const auto output_width = static_cast<std::uint32_t>(config_.output_width);
         const auto output_height = static_cast<std::uint32_t>(config_.output_height);
         const auto output_width_stride = align_up(output_width, 16U);
@@ -477,20 +528,31 @@ public:
             return std::nullopt;
         }
 
-        auto* resize_config = acldvppCreateResizeConfig();
-        if (resize_config == nullptr) {
+        DvppResizeConfig resize_config;
+        if (!resize_config.valid()) {
             last_error_ = "acldvppCreateResizeConfig failed";
+            return std::nullopt;
+        }
+
+        // 从这里开始会把异步任务压入 stream，后续失败路径必须先同步再释放 Device buffer。
+        ret = acldvppJpegDecodeAsync(channel_desc_,
+                                     payload,
+                                     static_cast<std::uint32_t>(payload_size),
+                                     decode_desc.get(),
+                                     stream_);
+        if (!acl_ok(ret)) {
+            last_error_ = make_acl_error("acldvppJpegDecodeAsync", static_cast<int>(ret));
             return std::nullopt;
         }
 
         ret = acldvppVpcResizeAsync(channel_desc_,
                                     decode_desc.get(),
                                     resize_desc.get(),
-                                    resize_config,
+                                    resize_config.get(),
                                     stream_);
-        acldvppDestroyResizeConfig(resize_config);
         if (!acl_ok(ret)) {
             last_error_ = make_acl_error("acldvppVpcResizeAsync", static_cast<int>(ret));
+            synchronize_stream_before_releasing_async_buffers(stream_);
             return std::nullopt;
         }
 
@@ -534,6 +596,162 @@ public:
         return tensor;
 #else
         static_cast<void>(frame);
+        last_error_ = "DVPP preprocessor is not enabled at build time";
+        return std::nullopt;
+#endif
+    }
+
+    /**
+     * @brief 将 MJPEG 帧通过 DVPP 直接写入目标 Device 张量。
+     * @param frame 视频源输出的原始帧。
+     * @param target 目标张量，必须是 Device 侧 NV12/UINT8 输入缓冲区。
+     * @return 成功返回已写入的目标张量；失败返回空。
+     */
+    std::optional<TensorBuffer> process_into(const Frame& frame, TensorBuffer target)
+    {
+#if SENTINEL_ENABLE_DVPP
+        if (!wants_nv12_tensor(config_) || !target.is_device()) {
+            return process(frame);
+        }
+        if (target.device_data == nullptr || target.device_bytes == 0U) {
+            last_error_ = "target device tensor is empty";
+            return std::nullopt;
+        }
+        if (channel_desc_ == nullptr || stream_ == nullptr) {
+            last_error_ = "DVPP preprocessor is not open";
+            return std::nullopt;
+        }
+        if (!is_mjpeg_frame(frame)) {
+            last_error_ = "DVPP device preprocessor currently supports only MJPEG frames";
+            return std::nullopt;
+        }
+
+        const auto* payload = frame.payload_data();
+        const auto payload_size = frame.payload_size();
+        if (payload == nullptr || payload_size == 0U) {
+            last_error_ = "input frame is empty";
+            return std::nullopt;
+        }
+        if (payload_size > std::numeric_limits<std::uint32_t>::max()) {
+            last_error_ = "input frame is too large for DVPP JPEGD";
+            return std::nullopt;
+        }
+
+        std::uint32_t source_width = 0;
+        std::uint32_t source_height = 0;
+        int32_t components = 0;
+        auto ret = acldvppJpegGetImageInfo(payload,
+                                           static_cast<std::uint32_t>(payload_size),
+                                           &source_width,
+                                           &source_height,
+                                           &components);
+        if (!acl_ok(ret)) {
+            last_error_ = make_acl_error("acldvppJpegGetImageInfo", static_cast<int>(ret));
+            return std::nullopt;
+        }
+        if (source_width == 0U || source_height == 0U) {
+            last_error_ = "acldvppJpegGetImageInfo returned empty image size";
+            return std::nullopt;
+        }
+
+        std::uint32_t decode_size = 0;
+        ret = acldvppJpegPredictDecSize(payload,
+                                        static_cast<std::uint32_t>(payload_size),
+                                        PIXEL_FORMAT_YUV_SEMIPLANAR_420,
+                                        &decode_size);
+        if (!acl_ok(ret)) {
+            last_error_ = make_acl_error("acldvppJpegPredictDecSize", static_cast<int>(ret));
+            return std::nullopt;
+        }
+
+        DeviceMemory decode_output;
+        if (!decode_output.allocate(decode_size, last_error_)) {
+            return std::nullopt;
+        }
+
+        const auto decode_width_stride = align_up(source_width, 128U);
+        const auto decode_height_stride = align_up(source_height, 16U);
+        DvppPicDesc decode_desc;
+        if (!decode_desc.valid() ||
+            !setup_pic_desc(decode_desc.get(),
+                            decode_output.data(),
+                            decode_size,
+                            source_width,
+                            source_height,
+                            decode_width_stride,
+                            decode_height_stride)) {
+            return std::nullopt;
+        }
+
+        const auto output_width = static_cast<std::uint32_t>(config_.output_width);
+        const auto output_height = static_cast<std::uint32_t>(config_.output_height);
+        const auto output_width_stride = align_up(output_width, 16U);
+        const auto output_height_stride = align_up(output_height, 2U);
+        const auto resize_size = yuv420sp_size(output_width_stride, output_height_stride);
+        if (target.device_bytes != resize_size ||
+            resize_size > std::numeric_limits<std::uint32_t>::max()) {
+            last_error_ = "target device tensor bytes mismatch for NV12 resize output: expected " +
+                          std::to_string(resize_size) + ", got " +
+                          std::to_string(target.device_bytes);
+            return std::nullopt;
+        }
+
+        DvppPicDesc resize_desc;
+        if (!resize_desc.valid() ||
+            !setup_pic_desc(resize_desc.get(),
+                            target.device_data,
+                            static_cast<std::uint32_t>(target.device_bytes),
+                            output_width,
+                            output_height,
+                            output_width_stride,
+                            output_height_stride)) {
+            return std::nullopt;
+        }
+
+        DvppResizeConfig resize_config;
+        if (!resize_config.valid()) {
+            last_error_ = "acldvppCreateResizeConfig failed";
+            return std::nullopt;
+        }
+
+        // 从这里开始会把异步任务压入 stream，后续失败路径必须先同步再释放 Device buffer。
+        ret = acldvppJpegDecodeAsync(channel_desc_,
+                                     payload,
+                                     static_cast<std::uint32_t>(payload_size),
+                                     decode_desc.get(),
+                                     stream_);
+        if (!acl_ok(ret)) {
+            last_error_ = make_acl_error("acldvppJpegDecodeAsync", static_cast<int>(ret));
+            return std::nullopt;
+        }
+
+        ret = acldvppVpcResizeAsync(channel_desc_,
+                                    decode_desc.get(),
+                                    resize_desc.get(),
+                                    resize_config.get(),
+                                    stream_);
+        if (!acl_ok(ret)) {
+            last_error_ = make_acl_error("acldvppVpcResizeAsync", static_cast<int>(ret));
+            synchronize_stream_before_releasing_async_buffers(stream_);
+            return std::nullopt;
+        }
+
+        ret = aclrtSynchronizeStream(stream_);
+        if (!acl_ok(ret)) {
+            last_error_ = make_acl_error("aclrtSynchronizeStream", static_cast<int>(ret));
+            return std::nullopt;
+        }
+
+        target.shape = {1, 1, config_.output_height, config_.output_width};
+        target.layout = config_.output_layout;
+        target.dtype = config_.output_dtype;
+        target.frame_sequence = frame.sequence;
+        target.camera_id = frame.camera_id;
+        last_error_.clear();
+        return target;
+#else
+        static_cast<void>(frame);
+        static_cast<void>(target);
         last_error_ = "DVPP preprocessor is not enabled at build time";
         return std::nullopt;
 #endif
@@ -644,6 +862,20 @@ void DvppFramePreprocessor::close() noexcept
 std::optional<TensorBuffer> DvppFramePreprocessor::process(const Frame& frame)
 {
     auto tensor = impl_->process(frame);
+    last_error_ = impl_->last_error();
+    return tensor;
+}
+
+/**
+ * @brief 将视频帧转换并写入目标张量。
+ * @param frame 视频源输出的原始帧。
+ * @param target 目标张量，静态 AIPP 路径下可为 Device 输入缓冲区。
+ * @return 成功返回已写入的张量；失败返回空。
+ */
+std::optional<TensorBuffer> DvppFramePreprocessor::process_into(const Frame& frame,
+                                                                TensorBuffer target)
+{
+    auto tensor = impl_->process_into(frame, std::move(target));
     last_error_ = impl_->last_error();
     return tensor;
 }

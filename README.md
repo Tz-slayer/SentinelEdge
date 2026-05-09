@@ -22,7 +22,7 @@
 - `data/`：本地运行数据目录
 
 当前 C++ 程序已经接入 V4L2 摄像头、AscendCL 推理后端骨架、日志策略和部署包生成流程。mock 输入只保留给本机单元测试夹具，开发板调试配置不再使用 mock。
-图像预处理已经抽象为策略接口，用户通过 `pipeline.backend` 在 `opencv` 和 `dvpp` 之间切换。`opencv` 使用 CPU/OpenCV 完成解码、缩放和 NCHW FP32 张量打包；`dvpp` 面向静态 AIPP 模型时会执行 JPEGD 解码和 VPC 缩放，并输出 NV12/YUV420SP UINT8 输入给 `.om` 模型。
+图像预处理已经抽象为策略接口，用户通过 `pipeline.backend` 在 `opencv` 和 `dvpp` 之间切换。`opencv` 使用 CPU/OpenCV 完成解码、缩放和 NCHW FP32 张量打包；`dvpp` 面向静态 AIPP 模型时会执行 JPEGD 解码和 VPC 缩放，并把 NV12/YUV420SP UINT8 结果直接写入 AscendCL 模型输入 Device buffer，避免 `DVPP -> Host -> AscendCL input` 往返拷贝。
 模型后处理已经抽象为策略接口，当前支持 YOLO FP32 输出解析、置信度过滤和 NMS；`dvpp` 配置路径下的 YOLO NMS 仍是 CPU 侧纯 C++ 实现，不伪装为 DVPP 硬件能力。
 摄像头配置已经支持运行期缓冲区模式开关：`buffer_mode: "copy"` 表示稳定的复制模式，`buffer_mode: "loaned"` 表示 V4L2 `mmap` 缓冲区租借模式，可减少摄像头帧进入 pipeline 时的一次用户态复制。
 图像处理能力已经统一抽象为 `ImageBackend`，当前 `opencv` 后端支持解码、缩放、张量打包和检测框绘制，`debug_image` 输出通道可以在开发板上保存带框 JPEG，用于验证检测结果是否可视化正确。
@@ -153,8 +153,10 @@ cameras:
 
 `copy` 会在 `VIDIOC_DQBUF` 后把驱动缓冲区复制到 `Frame::data`，随后立即 `VIDIOC_QBUF`
 归还给驱动。`loaned` 不复制帧载荷，而是让 `Frame` 持有 V4L2 buffer 租约，最后一个
-`Frame` 释放时自动 `VIDIOC_QBUF`。当前 `loaned` 仍会在 DVPP/OpenCV 预处理阶段产生后续
-格式转换和模型输入拷贝，它优化的是“摄像头帧进入 pipeline”这一段。
+`Frame` 释放时自动 `VIDIOC_QBUF`。`loaned` 优化的是“摄像头帧进入 pipeline”这一段；
+在 `dvpp` + 静态 AIPP 路径下，DVPP VPC 会继续直接写入 AscendCL 模型输入 Device buffer。
+当前仍保留的成本主要是 V4L2 MJPEG 码流位于 Host、JPEGD 解码临时 Device buffer 按帧申请、
+以及模型输出需要拷回 Host 做 YOLO 后处理。
 
 YOLO 后处理在 `config/*/sentinel.yaml` 中配置：
 
@@ -561,7 +563,7 @@ cmake --build build
 - `preprocess.output_width` / `preprocess.output_height`
   模型输入图像尺寸，必须与 `.om` 模型输入匹配
 - `preprocess.output_layout` / `preprocess.output_dtype`
-  模型输入张量布局和数据类型。OpenCV 路径使用 `NCHW` / `FP32`；DVPP + 静态 AIPP 路径使用 `NV12` / `UINT8`
+  模型输入张量布局和数据类型。OpenCV 路径使用 `NCHW` / `FP32`；DVPP + 静态 AIPP 路径使用 `NV12` / `UINT8`，并优先走 AscendCL Device buffer 直写路径
 - `overlay.enabled`
   是否在输出图像上绘制检测框
 - `output.video_sink`
