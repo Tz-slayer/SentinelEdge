@@ -283,7 +283,7 @@ pipeline:
 含义：
 
 - `detect_fps`：推理线程从 latest frame slot 取帧并提交推理的目标频率。
-- `stream_slots`：推理线程内部可同时挂起的异步 DVPP/AscendCL slot 数量，第一版限制为 `1..3`。
+- `stream_slots`：推理线程内部可同时挂起的异步 AscendCL slot 数量，当前第一版固定为 `2`。
 - `output_queue_size`：推理到输出的有界队列容量，满了丢最旧包。
 
 ## 关闭流程
@@ -321,11 +321,11 @@ pipeline:
 1. 新增 `LatestFrameSlot`。
 2. 新增 `BoundedOutputQueue`。
 3. 保留当前串行 `run_demo_pipeline()`，新增 `run_threaded_pipeline()`。
-4. 配置增加 `pipeline.mode: "serial" | "threaded"`，默认先保持 `serial`。
+4. 配置增加 `pipeline.mode: "serial" | "threaded"`，开发和生产配置默认使用 `threaded`，单元测试 fixture 保持 `serial`。
 5. `threaded` 模式下固定单摄像头、单推理调度线程、单输出线程。
-6. 推理线程内部先支持 `stream_slots=1` 和 `stream_slots=2`，默认 2。
+6. 推理线程内部先固定 `stream_slots=2`，每个 slot 独占一条 AscendCL stream、一套模型输入 Device buffer 和一套模型输出 Device buffer。
 7. 输出线程第一版只消费 `PipelineOutputPacket{Frame, DetectionResult}`，保证帧和框严格匹配。
-8. `video_sink=none` 时不向输出线程传递 `Frame`。
+8. `video_sink=none` 时仍经过输出线程和空输出策略，便于先验证三线程生命周期；后续性能收敛时可把该路径优化为不跨线程持有 `Frame`。
 9. 性能报告增加：
    - captured FPS
    - submitted FPS

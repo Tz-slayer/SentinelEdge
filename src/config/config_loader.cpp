@@ -257,8 +257,16 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             config.service.data_dir = value;
         } else if (section == "pipeline" && key == "backend") {
             config.pipeline.backend = value;
+        } else if (section == "pipeline" && key == "mode") {
+            config.pipeline.mode = value;
         } else if (section == "pipeline" && key == "max_frames") {
             config.pipeline.max_frames = std::stoi(value);
+        } else if (section == "pipeline" && key == "detect_fps") {
+            config.pipeline.detect_fps = std::stoi(value);
+        } else if (section == "pipeline" && key == "stream_slots") {
+            config.pipeline.stream_slots = std::stoi(value);
+        } else if (section == "pipeline" && key == "output_queue_size") {
+            config.pipeline.output_queue_size = std::stoi(value);
         }
     }
 }
@@ -435,8 +443,20 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     if (config.pipeline.backend != "dvpp") {
         throw std::runtime_error("pipeline.backend must be dvpp");
     }
+    if (config.pipeline.mode != "serial" && config.pipeline.mode != "threaded") {
+        throw std::runtime_error("pipeline.mode must be serial or threaded");
+    }
     if (config.pipeline.max_frames <= 0) {
         throw std::runtime_error("pipeline.max_frames must be greater than zero");
+    }
+    if (config.pipeline.detect_fps <= 0) {
+        throw std::runtime_error("pipeline.detect_fps must be greater than zero");
+    }
+    if (config.pipeline.stream_slots != 2) {
+        throw std::runtime_error("pipeline.stream_slots must be 2 in the current implementation");
+    }
+    if (config.pipeline.output_queue_size <= 0) {
+        throw std::runtime_error("pipeline.output_queue_size must be greater than zero");
     }
     if (config.logging.backend.empty()) {
         throw std::runtime_error("logging.backend must not be empty");

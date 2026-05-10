@@ -190,6 +190,11 @@ postprocess:
 ```yaml
 pipeline:
   backend: "dvpp"
+  mode: "threaded"          # serial / threaded
+  max_frames: 300
+  detect_fps: 15
+  stream_slots: 2
+  output_queue_size: 2
 
 overlay:
   enabled: true
@@ -556,6 +561,16 @@ cmake --build build
   AscendCL 设备编号，单设备通常为 `0`
 - `pipeline.backend`
   图像处理链路后端，当前只支持 `dvpp`
+- `pipeline.mode`
+  流水线运行模式。`threaded` 使用采集线程、推理线程和输出线程；`serial` 保留给单元测试和问题回退
+- `pipeline.max_frames`
+  本次运行最多处理的推理帧数
+- `pipeline.detect_fps`
+  推理线程从 latest frame buffer 取帧并提交推理的目标频率
+- `pipeline.stream_slots`
+  AscendCL 异步推理 slot 数量，当前实现固定为 `2`
+- `pipeline.output_queue_size`
+  推理线程到输出线程的有界队列容量，队列满时丢弃最旧输出包
 - `preprocess.output_width` / `preprocess.output_height`
   模型输入图像尺寸，必须与 `.om` 模型输入匹配
 - `preprocess.output_layout` / `preprocess.output_dtype`

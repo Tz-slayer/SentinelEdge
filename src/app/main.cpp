@@ -38,7 +38,10 @@ int main(int argc, char** argv)
         logger->info("service: " + config.service.host + ":" + std::to_string(config.service.port));
         logger->info("logging: backend=" + config.logging.backend + " level=" + config.logging.level);
         logger->info("pipeline: backend=" + config.pipeline.backend +
-                     " max_frames=" + std::to_string(config.pipeline.max_frames));
+                     " mode=" + config.pipeline.mode +
+                     " max_frames=" + std::to_string(config.pipeline.max_frames) +
+                     " detect_fps=" + std::to_string(config.pipeline.detect_fps) +
+                     " stream_slots=" + std::to_string(config.pipeline.stream_slots));
         logger->debug("debug logging enabled");
         logger->info("camera: " + config.cameras.front().id + " type=" + config.cameras.front().type);
 

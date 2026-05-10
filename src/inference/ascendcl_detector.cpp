@@ -18,6 +18,11 @@ namespace sentinel {
 namespace {
 
 /**
+ * @brief 第一版固定启用的 AscendCL 异步 stream slot 数量。
+ */
+constexpr std::size_t kAsyncSlotCount = 2;
+
+/**
  * @brief 判断 AscendCL 调用是否成功。
  * @param error AscendCL API 返回码。
  * @return 成功返回 `true`。
@@ -62,6 +67,22 @@ std::string preview_fp32_values(const std::vector<std::uint8_t>& output, std::si
 struct DeviceBuffer {
     void* data{nullptr};
     std::size_t size{0};
+};
+
+/**
+ * @brief AscendCL 异步推理 slot。
+ *
+ * 每个 slot 独占一条 stream、一套模型输入 Device buffer 和一套模型输出
+ * Device buffer，避免多 stream 并发时互相覆盖模型输入或输出。
+ */
+struct InferenceSlot {
+    aclrtStream stream{nullptr};
+    aclmdlDataset* input_dataset{nullptr};
+    aclmdlDataset* output_dataset{nullptr};
+    std::vector<DeviceBuffer> input_buffers;
+    std::vector<DeviceBuffer> output_buffers;
+    TensorBuffer input_tensor;
+    bool busy{false};
 };
 
 /**
@@ -128,7 +149,7 @@ public:
             return false;
         }
 
-        if (!create_datasets()) {
+        if (!create_slots()) {
             close();
             return false;
         }
@@ -150,8 +171,10 @@ public:
      */
     void close() noexcept
     {
-        destroy_dataset(input_dataset_, input_buffers_);
-        destroy_dataset(output_dataset_, output_buffers_);
+        for (auto& slot : slots_) {
+            destroy_slot(slot);
+        }
+        slots_.clear();
         if (postprocessor_) {
             postprocessor_->close();
             postprocessor_.reset();
@@ -178,69 +201,256 @@ public:
      */
     std::vector<Detection> detect(const TensorBuffer& tensor)
     {
-        if (input_buffers_.size() != 1U) {
+        if (slots_.empty()) {
+            last_error_ = "AscendCL detector has no initialized stream slots";
+            debug_info_ = "detect failed before execute: " + last_error_;
+            return {};
+        }
+
+        auto& slot = slots_.front();
+        if (slot.input_buffers.size() != 1U) {
             last_error_ = "AscendCL detector currently supports exactly one model input";
             debug_info_ = "detect failed before execute: " + last_error_;
             return {};
         }
 
-        if (tensor.byte_size() != input_buffers_.front().size) {
-            last_error_ = "tensor input bytes mismatch: expected " +
-                          std::to_string(input_buffers_.front().size) + ", got " +
-                          std::to_string(tensor.byte_size());
-            debug_info_ = "detect failed before execute: " + last_error_;
+        if (!copy_input_to_slot(slot, tensor)) {
+            debug_info_ = "detect failed while preparing input: " + last_error_;
             return {};
         }
 
-        auto ret = ACL_SUCCESS;
-        if (tensor.is_device()) {
-            if (tensor.device_data == nullptr) {
-                last_error_ = "device tensor input pointer is null";
-                debug_info_ = "detect failed before execute: " + last_error_;
-                return {};
-            }
-            if (tensor.device_data != input_buffers_.front().data) {
-                ret = aclrtMemcpy(input_buffers_.front().data,
-                                  input_buffers_.front().size,
-                                  tensor.device_data,
-                                  tensor.device_bytes,
-                                  ACL_MEMCPY_DEVICE_TO_DEVICE);
-                if (!acl_ok(ret)) {
-                    set_error("aclrtMemcpy(input device-to-device)", ret);
-                    debug_info_ = "detect failed while copying device input: " + last_error_;
-                    return {};
-                }
-            }
-        } else {
-            ret = aclrtMemcpy(input_buffers_.front().data,
-                              input_buffers_.front().size,
-                              tensor.data.data(),
-                              tensor.data.size(),
-                              ACL_MEMCPY_HOST_TO_DEVICE);
-            if (!acl_ok(ret)) {
-                set_error("aclrtMemcpy(input)", ret);
-                debug_info_ = "detect failed while copying input: " + last_error_;
-                return {};
-            }
-        }
-
-        ret = aclmdlExecute(model_id_, input_dataset_, output_dataset_);
+        const auto ret = aclmdlExecute(model_id_, slot.input_dataset, slot.output_dataset);
         if (!acl_ok(ret)) {
             set_error("aclmdlExecute", ret);
             debug_info_ = "detect failed during model execute: " + last_error_;
             return {};
         }
 
+        auto detections = collect_slot_outputs(slot, tensor);
+        if (!last_error_.empty()) {
+            return {};
+        }
+        return detections;
+    }
+
+    /**
+     * @brief 返回模型输入 Device buffer 视图。
+     * @param metadata 预处理阶段保留的张量元数据。
+     * @return 单输入模型返回 Device 张量视图，否则返回空。
+     */
+    std::optional<TensorBuffer> mutable_input_tensor(const TensorBuffer& metadata)
+    {
+        return mutable_input_tensor_for_slot(metadata, 0);
+    }
+
+    /**
+     * @brief 返回异步推理 slot 数量。
+     * @return 当前固定返回 2。
+     */
+    std::size_t async_slot_count() const noexcept
+    {
+        return slots_.size();
+    }
+
+    /**
+     * @brief 返回指定 slot 的模型输入 Device buffer 视图。
+     * @param metadata 预处理阶段保留的张量元数据。
+     * @param slot_index 异步 slot 下标。
+     * @return slot 空闲且输入 buffer 可用时返回 Device 张量视图。
+     */
+    std::optional<TensorBuffer> mutable_input_tensor_for_slot(const TensorBuffer& metadata,
+                                                              std::size_t slot_index)
+    {
+        if (slot_index >= slots_.size()) {
+            return std::nullopt;
+        }
+        const auto& slot = slots_[slot_index];
+        if (slot.busy || slot.input_buffers.size() != 1U ||
+            slot.input_buffers.front().data == nullptr ||
+            slot.input_buffers.front().size == 0U) {
+            return std::nullopt;
+        }
+
+        TensorBuffer tensor = metadata;
+        tensor.memory_location = TensorMemoryLocation::kDevice;
+        tensor.data.clear();
+        tensor.device_data = slot.input_buffers.front().data;
+        tensor.device_bytes = slot.input_buffers.front().size;
+        return tensor;
+    }
+
+    /**
+     * @brief 向指定 slot 提交异步推理。
+     * @param slot_index 异步 slot 下标。
+     * @param tensor 已完成预处理的输入张量。
+     * @return 成功提交返回 `true`。
+     */
+    bool submit_async(std::size_t slot_index, const TensorBuffer& tensor)
+    {
+        if (slot_index >= slots_.size()) {
+            last_error_ = "async slot index out of range: " + std::to_string(slot_index);
+            debug_info_ = "submit_async failed before execute: " + last_error_;
+            return false;
+        }
+
+        auto& slot = slots_[slot_index];
+        if (slot.busy) {
+            last_error_ = "async slot is busy: " + std::to_string(slot_index);
+            debug_info_ = "submit_async failed before execute: " + last_error_;
+            return false;
+        }
+        if (!copy_input_to_slot(slot, tensor)) {
+            debug_info_ = "submit_async failed while preparing input: " + last_error_;
+            return false;
+        }
+
+        const auto ret = aclmdlExecuteAsync(model_id_,
+                                            slot.input_dataset,
+                                            slot.output_dataset,
+                                            slot.stream);
+        if (!acl_ok(ret)) {
+            set_error("aclmdlExecuteAsync", ret);
+            debug_info_ = "submit_async failed during model execute: " + last_error_;
+            return false;
+        }
+
+        slot.input_tensor = tensor;
+        slot.busy = true;
+        last_error_.clear();
+        return true;
+    }
+
+    /**
+     * @brief 同步并回收指定异步 slot 的推理结果。
+     * @param slot_index 异步 slot 下标。
+     * @return 成功返回异步检测结果。
+     */
+    std::optional<DetectorAsyncResult> collect_async(std::size_t slot_index)
+    {
+        if (slot_index >= slots_.size()) {
+            last_error_ = "async slot index out of range: " + std::to_string(slot_index);
+            return std::nullopt;
+        }
+
+        auto& slot = slots_[slot_index];
+        if (!slot.busy) {
+            last_error_ = "async slot is not busy: " + std::to_string(slot_index);
+            return std::nullopt;
+        }
+
+        const auto ret = aclrtSynchronizeStream(slot.stream);
+        if (!acl_ok(ret)) {
+            set_error("aclrtSynchronizeStream(slot)", ret);
+            slot.busy = false;
+            return std::nullopt;
+        }
+
+        auto input_tensor = slot.input_tensor;
+        auto detections = collect_slot_outputs(slot, input_tensor);
+        const auto summary = debug_info_;
+        slot.input_tensor = TensorBuffer{};
+        slot.busy = false;
+        if (!last_error_.empty()) {
+            return std::nullopt;
+        }
+
+        return DetectorAsyncResult{
+            slot_index,
+            std::move(input_tensor),
+            std::move(detections),
+            summary,
+        };
+    }
+
+    /**
+     * @brief 返回最近一次错误文本。
+     * @return 错误文本。
+     */
+    std::string_view last_error() const noexcept
+    {
+        return last_error_;
+    }
+
+    /**
+     * @brief 返回最近一次推理的调试摘要。
+     * @return 调试摘要文本。
+     */
+    std::string_view debug_info() const noexcept
+    {
+        return debug_info_;
+    }
+
+private:
+    /**
+     * @brief 将输入张量复制或确认到 slot 的模型输入 Device buffer。
+     * @param slot 目标异步 slot。
+     * @param tensor 输入张量。
+     * @return 成功返回 `true`。
+     */
+    bool copy_input_to_slot(InferenceSlot& slot, const TensorBuffer& tensor)
+    {
+        if (slot.input_buffers.size() != 1U) {
+            last_error_ = "AscendCL detector currently supports exactly one model input";
+            return false;
+        }
+
+        if (tensor.byte_size() != slot.input_buffers.front().size) {
+            last_error_ = "tensor input bytes mismatch: expected " +
+                          std::to_string(slot.input_buffers.front().size) + ", got " +
+                          std::to_string(tensor.byte_size());
+            return false;
+        }
+
+        auto ret = ACL_SUCCESS;
+        if (tensor.is_device()) {
+            if (tensor.device_data == nullptr) {
+                last_error_ = "device tensor input pointer is null";
+                return false;
+            }
+            if (tensor.device_data != slot.input_buffers.front().data) {
+                ret = aclrtMemcpy(slot.input_buffers.front().data,
+                                  slot.input_buffers.front().size,
+                                  tensor.device_data,
+                                  tensor.device_bytes,
+                                  ACL_MEMCPY_DEVICE_TO_DEVICE);
+                if (!acl_ok(ret)) {
+                    set_error("aclrtMemcpy(input device-to-device)", ret);
+                    return false;
+                }
+            }
+        } else {
+            ret = aclrtMemcpy(slot.input_buffers.front().data,
+                              slot.input_buffers.front().size,
+                              tensor.data.data(),
+                              tensor.data.size(),
+                              ACL_MEMCPY_HOST_TO_DEVICE);
+            if (!acl_ok(ret)) {
+                set_error("aclrtMemcpy(input)", ret);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief 从 slot 输出 Device buffer 拷回 Host 并执行后处理。
+     * @param slot 已完成模型执行的 slot。
+     * @param tensor 本次推理输入张量元数据。
+     * @return 成功返回检测结果。
+     */
+    std::vector<Detection> collect_slot_outputs(InferenceSlot& slot, const TensorBuffer& tensor)
+    {
         raw_outputs_.clear();
-        raw_outputs_.reserve(output_buffers_.size());
-        for (std::size_t index = 0; index < output_buffers_.size(); ++index) {
-            const auto& output = output_buffers_[index];
+        raw_outputs_.reserve(slot.output_buffers.size());
+        for (std::size_t index = 0; index < slot.output_buffers.size(); ++index) {
+            const auto& output = slot.output_buffers[index];
             std::vector<std::uint8_t> host_output(output.size);
-            ret = aclrtMemcpy(host_output.data(),
-                              host_output.size(),
-                              output.data,
-                              output.size,
-                              ACL_MEMCPY_DEVICE_TO_HOST);
+            const auto ret = aclrtMemcpy(host_output.data(),
+                                         host_output.size(),
+                                         output.data,
+                                         output.size,
+                                         ACL_MEMCPY_DEVICE_TO_HOST);
             if (!acl_ok(ret)) {
                 set_error("aclrtMemcpy(output)", ret);
                 debug_info_ = "detect failed while copying output: " + last_error_;
@@ -272,46 +482,6 @@ public:
         last_error_.clear();
         return detections;
     }
-
-    /**
-     * @brief 返回模型输入 Device buffer 视图。
-     * @param metadata 预处理阶段保留的张量元数据。
-     * @return 单输入模型返回 Device 张量视图，否则返回空。
-     */
-    std::optional<TensorBuffer> mutable_input_tensor(const TensorBuffer& metadata)
-    {
-        if (input_buffers_.size() != 1U || input_buffers_.front().data == nullptr ||
-            input_buffers_.front().size == 0U) {
-            return std::nullopt;
-        }
-
-        TensorBuffer tensor = metadata;
-        tensor.memory_location = TensorMemoryLocation::kDevice;
-        tensor.data.clear();
-        tensor.device_data = input_buffers_.front().data;
-        tensor.device_bytes = input_buffers_.front().size;
-        return tensor;
-    }
-
-    /**
-     * @brief 返回最近一次错误文本。
-     * @return 错误文本。
-     */
-    std::string_view last_error() const noexcept
-    {
-        return last_error_;
-    }
-
-    /**
-     * @brief 返回最近一次推理的调试摘要。
-     * @return 调试摘要文本。
-     */
-    std::string_view debug_info() const noexcept
-    {
-        return debug_info_;
-    }
-
-private:
     /**
      * @brief 生成一次 AscendCL 推理后的轻量调试摘要。
      * @param tensor 本次推理输入张量。
@@ -338,28 +508,37 @@ private:
     }
 
     /**
-     * @brief 创建模型输入输出数据集。
+     * @brief 创建固定数量的异步推理 slot。
      * @return 成功返回 `true`。
      */
-    bool create_datasets()
+    bool create_slots()
     {
-        input_dataset_ = aclmdlCreateDataset();
-        if (input_dataset_ == nullptr) {
-            last_error_ = "aclmdlCreateDataset(input) failed";
-            return false;
-        }
+        slots_.resize(kAsyncSlotCount);
+        for (auto& slot : slots_) {
+            auto ret = aclrtCreateStream(&slot.stream);
+            if (!acl_ok(ret)) {
+                set_error("aclrtCreateStream(slot)", ret);
+                return false;
+            }
 
-        output_dataset_ = aclmdlCreateDataset();
-        if (output_dataset_ == nullptr) {
-            last_error_ = "aclmdlCreateDataset(output) failed";
-            return false;
-        }
+            slot.input_dataset = aclmdlCreateDataset();
+            if (slot.input_dataset == nullptr) {
+                last_error_ = "aclmdlCreateDataset(input) failed";
+                return false;
+            }
 
-        if (!create_buffers_for_dataset(input_dataset_, input_buffers_, true)) {
-            return false;
-        }
-        if (!create_buffers_for_dataset(output_dataset_, output_buffers_, false)) {
-            return false;
+            slot.output_dataset = aclmdlCreateDataset();
+            if (slot.output_dataset == nullptr) {
+                last_error_ = "aclmdlCreateDataset(output) failed";
+                return false;
+            }
+
+            if (!create_buffers_for_dataset(slot.input_dataset, slot.input_buffers, true)) {
+                return false;
+            }
+            if (!create_buffers_for_dataset(slot.output_dataset, slot.output_buffers, false)) {
+                return false;
+            }
         }
 
         return true;
@@ -440,6 +619,25 @@ private:
     }
 
     /**
+     * @brief 销毁单个异步推理 slot 及其独占资源。
+     * @param slot 待销毁的 slot。
+     */
+    static void destroy_slot(InferenceSlot& slot) noexcept
+    {
+        if (slot.stream != nullptr) {
+            aclrtSynchronizeStream(slot.stream);
+        }
+        destroy_dataset(slot.input_dataset, slot.input_buffers);
+        destroy_dataset(slot.output_dataset, slot.output_buffers);
+        if (slot.stream != nullptr) {
+            aclrtDestroyStream(slot.stream);
+            slot.stream = nullptr;
+        }
+        slot.input_tensor = TensorBuffer{};
+        slot.busy = false;
+    }
+
+    /**
      * @brief 设置最近一次 AscendCL 错误文本。
      * @param action 失败的操作名称。
      * @param error AscendCL 返回码。
@@ -454,14 +652,11 @@ private:
     PostprocessConfig postprocess_config_;
     std::string last_error_;
     std::string debug_info_;
-    std::vector<DeviceBuffer> input_buffers_;
-    std::vector<DeviceBuffer> output_buffers_;
+    std::vector<InferenceSlot> slots_;
     std::vector<ModelOutputBuffer> raw_outputs_;
     std::unique_ptr<DetectionPostprocessor> postprocessor_;
     std::unique_ptr<AclRuntimeSession> runtime_session_;
     aclmdlDesc* model_desc_{nullptr};
-    aclmdlDataset* input_dataset_{nullptr};
-    aclmdlDataset* output_dataset_{nullptr};
     uint32_t model_id_{0};
     bool model_loaded_{false};
 };
@@ -520,6 +715,49 @@ std::vector<Detection> AscendClDetector::detect(const TensorBuffer& tensor)
 std::optional<TensorBuffer> AscendClDetector::mutable_input_tensor(const TensorBuffer& metadata)
 {
     return impl_->mutable_input_tensor(metadata);
+}
+
+/**
+ * @brief 返回 AscendCL 异步推理 slot 数量。
+ * @return 当前固定返回 2。
+ */
+std::size_t AscendClDetector::async_slot_count() const noexcept
+{
+    return impl_->async_slot_count();
+}
+
+/**
+ * @brief 返回指定异步 slot 的模型输入 Device buffer 视图。
+ * @param metadata 预处理阶段生成的张量元数据。
+ * @param slot_index 异步 slot 下标。
+ * @return 成功返回 Device 张量视图；slot 不可用时返回空。
+ */
+std::optional<TensorBuffer> AscendClDetector::mutable_input_tensor_for_slot(
+    const TensorBuffer& metadata,
+    std::size_t slot_index)
+{
+    return impl_->mutable_input_tensor_for_slot(metadata, slot_index);
+}
+
+/**
+ * @brief 向指定 AscendCL stream slot 提交异步推理。
+ * @param slot_index 异步 slot 下标。
+ * @param tensor 已完成预处理的模型输入张量。
+ * @return 成功提交返回 `true`。
+ */
+bool AscendClDetector::submit_async(std::size_t slot_index, const TensorBuffer& tensor)
+{
+    return impl_->submit_async(slot_index, tensor);
+}
+
+/**
+ * @brief 同步并回收指定 AscendCL stream slot 的推理结果。
+ * @param slot_index 异步 slot 下标。
+ * @return 成功返回检测结果；失败返回空。
+ */
+std::optional<DetectorAsyncResult> AscendClDetector::collect_async(std::size_t slot_index)
+{
+    return impl_->collect_async(slot_index);
 }
 
 /**

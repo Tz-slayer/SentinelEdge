@@ -2,11 +2,23 @@
 
 #include "sentinel/common/types.hpp"
 
+#include <cstddef>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace sentinel {
+
+/**
+ * @brief 异步推理 slot 回收结果。
+ */
+struct DetectorAsyncResult {
+    std::size_t slot_index{0};
+    TensorBuffer input_tensor;
+    std::vector<Detection> detections;
+    std::string debug_info;
+};
 
 /**
  * @brief 目标检测策略接口。
@@ -57,6 +69,54 @@ public:
     virtual std::optional<TensorBuffer> mutable_input_tensor(const TensorBuffer& metadata)
     {
         static_cast<void>(metadata);
+        return std::nullopt;
+    }
+
+    /**
+     * @brief 返回检测器支持的异步推理 slot 数量。
+     * @return 默认返回 0，表示该检测器不支持异步 slot 调度。
+     */
+    virtual std::size_t async_slot_count() const noexcept
+    {
+        return 0;
+    }
+
+    /**
+     * @brief 获取指定异步 slot 的可写模型输入缓冲区。
+     * @param metadata 预处理阶段需要保留的张量元数据。
+     * @param slot_index 异步 slot 下标。
+     * @return 支持外部写入且 slot 空闲时返回 Device 张量视图，否则返回空。
+     */
+    virtual std::optional<TensorBuffer> mutable_input_tensor_for_slot(
+        const TensorBuffer& metadata,
+        std::size_t slot_index)
+    {
+        static_cast<void>(metadata);
+        static_cast<void>(slot_index);
+        return std::nullopt;
+    }
+
+    /**
+     * @brief 向指定异步 slot 提交一次模型推理。
+     * @param slot_index 异步 slot 下标。
+     * @param tensor 已完成预处理的模型输入张量。
+     * @return 成功提交返回 `true`，失败返回 `false` 并更新 `last_error()`。
+     */
+    virtual bool submit_async(std::size_t slot_index, const TensorBuffer& tensor)
+    {
+        static_cast<void>(slot_index);
+        static_cast<void>(tensor);
+        return false;
+    }
+
+    /**
+     * @brief 回收指定异步 slot 的推理结果。
+     * @param slot_index 异步 slot 下标。
+     * @return slot 完成且回收成功返回结果；slot 不忙或失败返回空并更新 `last_error()`。
+     */
+    virtual std::optional<DetectorAsyncResult> collect_async(std::size_t slot_index)
+    {
+        static_cast<void>(slot_index);
         return std::nullopt;
     }
 

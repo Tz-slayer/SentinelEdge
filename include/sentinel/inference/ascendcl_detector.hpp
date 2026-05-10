@@ -3,6 +3,7 @@
 #include "sentinel/common/types.hpp"
 #include "sentinel/inference/detector.hpp"
 
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -55,6 +56,37 @@ public:
      * @return 成功返回 Device 张量视图；当前模型输入不满足条件时返回空。
      */
     std::optional<TensorBuffer> mutable_input_tensor(const TensorBuffer& metadata) override;
+
+    /**
+     * @brief 返回 AscendCL 异步推理 slot 数量。
+     * @return 当前固定返回 2。
+     */
+    std::size_t async_slot_count() const noexcept override;
+
+    /**
+     * @brief 返回指定异步 slot 的模型输入 Device buffer 视图。
+     * @param metadata 预处理阶段生成的张量元数据。
+     * @param slot_index 异步 slot 下标。
+     * @return 成功返回 Device 张量视图；slot 不可用时返回空。
+     */
+    std::optional<TensorBuffer> mutable_input_tensor_for_slot(
+        const TensorBuffer& metadata,
+        std::size_t slot_index) override;
+
+    /**
+     * @brief 向指定 AscendCL stream slot 提交异步推理。
+     * @param slot_index 异步 slot 下标。
+     * @param tensor 已完成预处理的模型输入张量。
+     * @return 成功提交返回 `true`。
+     */
+    bool submit_async(std::size_t slot_index, const TensorBuffer& tensor) override;
+
+    /**
+     * @brief 同步并回收指定 AscendCL stream slot 的推理结果。
+     * @param slot_index 异步 slot 下标。
+     * @return 成功返回检测结果；失败返回空。
+     */
+    std::optional<DetectorAsyncResult> collect_async(std::size_t slot_index) override;
 
     /**
      * @brief 返回检测器后端类型。

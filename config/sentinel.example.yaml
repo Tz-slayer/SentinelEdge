@@ -51,4 +51,8 @@ runtime:
 
 pipeline:
   backend: "dvpp"
+  mode: "threaded"
   max_frames: 5
+  detect_fps: 15
+  stream_slots: 2
+  output_queue_size: 2

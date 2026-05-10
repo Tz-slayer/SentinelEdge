@@ -137,6 +137,54 @@ std::optional<TensorBuffer> AscendClDetector::mutable_input_tensor(const TensorB
 }
 
 /**
+ * @brief 占位实现不支持异步推理 slot。
+ * @return 固定返回 0。
+ */
+std::size_t AscendClDetector::async_slot_count() const noexcept
+{
+    return 0;
+}
+
+/**
+ * @brief 占位实现不暴露异步 slot 输入缓冲区。
+ * @param metadata 预处理阶段生成的张量元数据。
+ * @param slot_index 异步 slot 下标。
+ * @return 固定返回空。
+ */
+std::optional<TensorBuffer> AscendClDetector::mutable_input_tensor_for_slot(
+    const TensorBuffer& metadata,
+    std::size_t slot_index)
+{
+    static_cast<void>(metadata);
+    static_cast<void>(slot_index);
+    return std::nullopt;
+}
+
+/**
+ * @brief 占位实现不支持异步提交。
+ * @param slot_index 异步 slot 下标。
+ * @param tensor 输入张量。
+ * @return 固定返回 `false`。
+ */
+bool AscendClDetector::submit_async(std::size_t slot_index, const TensorBuffer& tensor)
+{
+    static_cast<void>(slot_index);
+    static_cast<void>(tensor);
+    return false;
+}
+
+/**
+ * @brief 占位实现不支持异步回收。
+ * @param slot_index 异步 slot 下标。
+ * @return 固定返回空。
+ */
+std::optional<DetectorAsyncResult> AscendClDetector::collect_async(std::size_t slot_index)
+{
+    static_cast<void>(slot_index);
+    return std::nullopt;
+}
+
+/**
  * @brief 返回检测器后端类型。
  * @return 固定返回 `"ascendcl"`。
  */
