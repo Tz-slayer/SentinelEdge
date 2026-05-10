@@ -1,6 +1,7 @@
 #include "sentinel/perf/performance_stats.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <iomanip>
 #include <sstream>
 
@@ -27,6 +28,7 @@ std::string format_ms(double value)
  */
 PerformanceStats::PerformanceStats(int log_interval_frames)
     : log_interval_frames_(std::max(1, log_interval_frames))
+    , window_start_(std::chrono::steady_clock::now())
 {
 }
 
@@ -70,14 +72,24 @@ bool PerformanceStats::has_pending_samples() const noexcept
 std::string PerformanceStats::make_report_and_reset()
 {
     const auto frames = std::max(1, window_frames_);
-    const auto fps = frame_total_.total_ms > 0.0
-                         ? static_cast<double>(window_frames_) * 1000.0 / frame_total_.total_ms
-                         : 0.0;
+    const auto now = std::chrono::steady_clock::now();
+    const auto window_elapsed_ms =
+        std::chrono::duration<double, std::milli>(now - window_start_).count();
+    const auto throughput_fps = window_elapsed_ms > 0.0
+                                    ? static_cast<double>(window_frames_) * 1000.0 /
+                                          window_elapsed_ms
+                                    : 0.0;
+    const auto latency_fps = frame_total_.total_ms > 0.0
+                                 ? static_cast<double>(window_frames_) * 1000.0 /
+                                       frame_total_.total_ms
+                                 : 0.0;
 
     std::ostringstream stream;
     stream << "perf window_frames=" << window_frames_
            << " total_frames=" << total_frames_
-           << " fps=" << format_ms(fps)
+           << " throughput_fps=" << format_ms(throughput_fps)
+           << " latency_fps=" << format_ms(latency_fps)
+           << " window_elapsed_ms=" << format_ms(window_elapsed_ms)
            << " capture_avg_ms=" << format_ms(average_stage(capture_, frames))
            << " capture_max_ms=" << format_ms(capture_.max_ms)
            << " preprocess_avg_ms=" << format_ms(average_stage(preprocess_, frames))
@@ -95,6 +107,7 @@ std::string PerformanceStats::make_report_and_reset()
     detect_ = StageAccumulator{};
     output_ = StageAccumulator{};
     frame_total_ = StageAccumulator{};
+    window_start_ = now;
     return stream.str();
 }
 

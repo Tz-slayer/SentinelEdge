@@ -144,7 +144,8 @@ preprocess_ms    解码、缩放、转张量耗时
 detect_ms        Detector::detect() 总耗时，当前包含推理和后处理
 output_ms        debug_image 或 MJPEG 输出耗时
 frame_total_ms   单帧总耗时
-fps              实际处理帧率
+throughput_fps   按性能窗口墙钟时间计算的实际产出吞吐；video_sink=none 时表示推理结果产出吞吐
+latency_fps      按 frame_total_ms 折算的端到端延迟指标，不代表多线程吞吐
 ```
 
 建议每 30 帧输出一次聚合数据：
@@ -153,7 +154,8 @@ fps              实际处理帧率
 avg_ms
 max_ms
 min_ms
-fps
+throughput_fps
+latency_fps
 ```
 
 当前阶段只测试一条 pipeline，不再默认做 backend/output 矩阵。测试时必须固定摄像头

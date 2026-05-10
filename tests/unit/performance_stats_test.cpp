@@ -56,6 +56,10 @@ int main()
     const auto report = stats.make_report_and_reset();
     expect(report.find("window_frames=2") != std::string::npos,
            "report should include window frame count");
+    expect(report.find("throughput_fps=") != std::string::npos,
+           "report should include wall-clock throughput fps");
+    expect(report.find("latency_fps=66.67") != std::string::npos,
+           "report should include latency-derived fps");
     expect(report.find("capture_avg_ms=1.50") != std::string::npos,
            "report should include averaged capture time");
     expect(report.find("frame_max_ms=20.00") != std::string::npos,

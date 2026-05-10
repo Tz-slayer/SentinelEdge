@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <string>
 
@@ -25,8 +26,9 @@ struct FramePerformanceSample {
 /**
  * @brief pipeline 性能窗口聚合器。
  *
- * 该类按固定帧数窗口累计耗时，生成平均值、最大值和估算 FPS。它不直接写日志，
- * 调用方负责把 `make_report_and_reset()` 返回的文本交给日志系统。
+ * 该类按固定帧数窗口累计耗时，生成平均值、最大值和基于墙钟时间的吞吐 FPS。
+ * `latency_fps` 仅作为端到端延迟折算值输出，不代表多线程 pipeline 的吞吐。
+ * 它不直接写日志，调用方负责把 `make_report_and_reset()` 返回的文本交给日志系统。
  */
 class PerformanceStats {
 public:
@@ -100,6 +102,7 @@ private:
     int log_interval_frames_{1};
     int window_frames_{0};
     int total_frames_{0};
+    std::chrono::steady_clock::time_point window_start_;
     StageAccumulator capture_;
     StageAccumulator preprocess_;
     StageAccumulator detect_;
