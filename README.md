@@ -192,7 +192,7 @@ pipeline:
   backend: "dvpp"
   mode: "threaded"          # serial / threaded
   max_frames: 300
-  detect_fps: 15
+  detect_fps: 30
   stream_slots: 2
   output_queue_size: 2
 

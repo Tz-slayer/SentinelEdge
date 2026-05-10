@@ -5,6 +5,7 @@ PACKAGE_DIR="${1:-build/board-native-debug-package}"
 CONFIG_DIR="${2:-config/dev}"
 FRAMES="${FRAMES:-300}"
 INTERVAL="${INTERVAL:-30}"
+DETECT_FPS="${DETECT_FPS:-30}"
 CSV_PATH="${CSV_PATH:-perf/pipeline.csv}"
 LOG_NAME="${LOG_NAME:-pipeline.log}"
 
@@ -35,14 +36,16 @@ perl -0pi -e "s/(pipeline:\\n\\s+backend: )\"[^\"]*\"/\${1}\"dvpp\"/" \
 perl -0pi -e "s/(performance:\\n\\s+enabled: )(?:true|false)/\${1}true/" \
     "${CONFIG_FILE}"
 sed -i \
+    -e 's/^  level:.*/  level: "info"/' \
     -e 's/^  video_sink:.*/  video_sink: "none"/' \
     -e "s/^  log_interval_frames:.*/  log_interval_frames: ${INTERVAL}/" \
     -e "s|^  csv_path:.*|  csv_path: \"${CSV_PATH}\"|" \
     -e "s/^  max_frames:.*/  max_frames: ${FRAMES}/" \
+    -e "s/^  detect_fps:.*/  detect_fps: ${DETECT_FPS}/" \
     "${CONFIG_FILE}"
 
-printf 'running single pipeline perf: package=%s config=%s frames=%s interval=%s csv=%s\n' \
-    "${PACKAGE_DIR}" "${CONFIG_DIR}" "${FRAMES}" "${INTERVAL}" "${CSV_PATH}"
+printf 'running single pipeline perf: package=%s config=%s frames=%s interval=%s detect_fps=%s csv=%s\n' \
+    "${PACKAGE_DIR}" "${CONFIG_DIR}" "${FRAMES}" "${INTERVAL}" "${DETECT_FPS}" "${CSV_PATH}"
 printf 'fixed profile: backend=dvpp buffer_mode=loaned sink=none\n'
 
 (

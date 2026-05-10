@@ -17,6 +17,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <stdexcept>
 #include <thread>
@@ -629,87 +630,119 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                 return true;
             };
 
-            while (!stop.load() && result.frames_processed < config.pipeline.max_frames) {
-                for (std::size_t slot_index = 0;
-                     slot_index < static_cast<std::size_t>(config.pipeline.stream_slots) &&
-                     submitted_frames < config.pipeline.max_frames;
-                     ++slot_index) {
-                    auto& slot = stream_slots[slot_index];
-                    if (slot.busy) {
-                        continue;
+            const auto submit_slot = [&](std::size_t slot_index) -> bool {
+                if (submitted_frames >= config.pipeline.max_frames || stop.load()) {
+                    return false;
+                }
+
+                auto& slot = stream_slots[slot_index];
+                if (slot.busy) {
+                    return false;
+                }
+
+                std::this_thread::sleep_until(next_submit_time);
+                next_submit_time = Clock::now() +
+                                   std::chrono::duration_cast<Clock::duration>(submit_interval);
+
+                auto captured = latest_frame.wait_newer(last_generation, stop);
+                if (!captured.has_value()) {
+                    return false;
+                }
+                last_generation = captured->second;
+                slot.captured = std::move(captured->first);
+
+                TensorBuffer tensor;
+                double preprocess_ms = 0.0;
+                if (preprocessor) {
+                    const auto preprocess_start = Clock::now();
+                    const auto target_metadata = make_preprocess_target_metadata(
+                        config.preprocess,
+                        slot.captured.frame);
+                    auto target_tensor = detector->mutable_input_tensor_for_slot(target_metadata,
+                                                                                 slot_index);
+                    if (!target_tensor.has_value()) {
+                        set_thread_error("detector slot input tensor unavailable");
+                        return false;
                     }
+                    auto* native_stream = detector->native_stream_for_slot(slot_index);
+                    if (native_stream == nullptr) {
+                        set_thread_error("detector native stream unavailable for slot");
+                        return false;
+                    }
+                    auto processed = preprocessor->process_into_slot(slot.captured.frame,
+                                                                     std::move(*target_tensor),
+                                                                     slot_index,
+                                                                     native_stream);
+                    preprocess_ms = elapsed_ms_since(preprocess_start);
+                    if (!processed.has_value()) {
+                        set_thread_error("frame preprocessor failed: " +
+                                         std::string(preprocessor->last_error()));
+                        return false;
+                    }
+                    tensor = std::move(*processed);
+                } else {
+                    tensor = make_metadata_tensor(slot.captured.frame);
+                }
+                logger.debug(make_tensor_debug_message(tensor));
 
-                    std::this_thread::sleep_until(next_submit_time);
-                    next_submit_time = Clock::now() +
-                                       std::chrono::duration_cast<Clock::duration>(
-                                           submit_interval);
+                if (!detector->submit_async(slot_index, tensor)) {
+                    set_thread_error("detector async submit failed: " +
+                                     std::string(detector->last_error()));
+                    return false;
+                }
 
-                    auto captured = latest_frame.wait_newer(last_generation, stop);
-                    if (!captured.has_value()) {
+                slot.busy = true;
+                slot.preprocess_ms = preprocess_ms;
+                ++submitted_frames;
+                return true;
+            };
+
+            for (std::size_t slot_index = 0;
+                 slot_index < static_cast<std::size_t>(config.pipeline.stream_slots);
+                 ++slot_index) {
+                if (!submit_slot(slot_index) && stop.load()) {
+                    return;
+                }
+            }
+
+            std::size_t next_collect_slot = 0;
+            while (!stop.load() && result.frames_processed < config.pipeline.max_frames) {
+                std::optional<std::size_t> busy_slot;
+                for (std::size_t offset = 0;
+                     offset < static_cast<std::size_t>(config.pipeline.stream_slots);
+                     ++offset) {
+                    const auto slot_index =
+                        (next_collect_slot + offset) %
+                        static_cast<std::size_t>(config.pipeline.stream_slots);
+                    if (stream_slots[slot_index].busy) {
+                        busy_slot = slot_index;
                         break;
                     }
-                    last_generation = captured->second;
-                    slot.captured = std::move(captured->first);
-
-                    TensorBuffer tensor;
-                    double preprocess_ms = 0.0;
-                    if (preprocessor) {
-                        const auto preprocess_start = Clock::now();
-                        const auto target_metadata = make_preprocess_target_metadata(
-                            config.preprocess,
-                            slot.captured.frame);
-                        auto target_tensor = detector->mutable_input_tensor_for_slot(
-                            target_metadata,
-                            slot_index);
-                        if (!target_tensor.has_value()) {
-                            set_thread_error("detector slot input tensor unavailable");
-                            return;
-                        }
-                        auto* native_stream = detector->native_stream_for_slot(slot_index);
-                        if (native_stream == nullptr) {
-                            set_thread_error("detector native stream unavailable for slot");
-                            return;
-                        }
-                        auto processed = preprocessor->process_into_slot(slot.captured.frame,
-                                                                         std::move(*target_tensor),
-                                                                         slot_index,
-                                                                         native_stream);
-                        preprocess_ms = elapsed_ms_since(preprocess_start);
-                        if (!processed.has_value()) {
-                            set_thread_error("frame preprocessor failed: " +
-                                             std::string(preprocessor->last_error()));
-                            return;
-                        }
-                        tensor = std::move(*processed);
-                    } else {
-                        tensor = make_metadata_tensor(slot.captured.frame);
-                    }
-                    logger.debug(make_tensor_debug_message(tensor));
-
-                    if (!detector->submit_async(slot_index, tensor)) {
-                        set_thread_error("detector async submit failed: " +
-                                         std::string(detector->last_error()));
-                        return;
-                    }
-                    slot.busy = true;
-                    slot.preprocess_ms = preprocess_ms;
-                    ++submitted_frames;
                 }
 
-                bool collected_any = false;
-                for (std::size_t slot_index = 0;
-                     slot_index < static_cast<std::size_t>(config.pipeline.stream_slots);
-                     ++slot_index) {
-                    if (stream_slots[slot_index].busy) {
-                        if (!collect_slot(slot_index)) {
-                            return;
-                        }
-                        collected_any = true;
+                if (!busy_slot.has_value()) {
+                    if (submitted_frames >= config.pipeline.max_frames || latest_frame.closed()) {
+                        break;
                     }
+                    for (std::size_t slot_index = 0;
+                         slot_index < static_cast<std::size_t>(config.pipeline.stream_slots);
+                         ++slot_index) {
+                        if (submit_slot(slot_index)) {
+                            break;
+                        }
+                    }
+                    continue;
                 }
 
-                if (!collected_any && latest_frame.closed()) {
-                    break;
+                if (!collect_slot(*busy_slot)) {
+                    return;
+                }
+                next_collect_slot =
+                    (*busy_slot + 1U) % static_cast<std::size_t>(config.pipeline.stream_slots);
+
+                // 一个 slot 回收完成后立即补下一帧，避免该 stream 空闲等待另一个 slot。
+                if (submitted_frames < config.pipeline.max_frames && !latest_frame.closed()) {
+                    static_cast<void>(submit_slot(*busy_slot));
                 }
             }
 

@@ -118,7 +118,7 @@ struct PipelineConfig {
     std::string backend{"dvpp"};
     std::string mode{"threaded"};
     int max_frames{5};
-    int detect_fps{15};
+    int detect_fps{30};
     int stream_slots{2};
     int output_queue_size{2};
 };

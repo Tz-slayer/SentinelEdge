@@ -39,7 +39,7 @@ int main(int argc, char** argv)
     expect(config.inference.backend == "mock", "inference backend should come from config");
     expect(config.pipeline.backend == "dvpp", "pipeline backend should come from config");
     expect(config.pipeline.mode == "serial", "pipeline mode should come from config");
-    expect(config.pipeline.detect_fps == 15, "pipeline detect_fps should come from config");
+    expect(config.pipeline.detect_fps == 30, "pipeline detect_fps should come from config");
     expect(config.pipeline.stream_slots == 2, "pipeline stream_slots should come from config");
     expect(config.pipeline.output_queue_size == 2,
            "pipeline output_queue_size should come from config");
