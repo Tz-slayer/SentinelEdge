@@ -115,6 +115,12 @@ std::unique_ptr<AclRuntimeSession> AclRuntimeSession::acquire(int device_id, std
                     ", requested device " + std::to_string(device_id);
             return nullptr;
         }
+        // AscendCL current context 是线程相关状态；每个工作线程 acquire 时都必须重新绑定。
+        const auto set_context_ret = aclrtSetCurrentContext(state.context);
+        if (!acl_ok(set_context_ret)) {
+            error = make_acl_error("aclrtSetCurrentContext", static_cast<int>(set_context_ret));
+            return nullptr;
+        }
         ++state.ref_count;
         error.clear();
         return std::unique_ptr<AclRuntimeSession>(new AclRuntimeSession(device_id));
@@ -139,6 +145,18 @@ std::unique_ptr<AclRuntimeSession> AclRuntimeSession::acquire(int device_id, std
     ret = aclrtCreateContext(&state.context, device_id);
     if (!acl_ok(ret)) {
         error = make_acl_error("aclrtCreateContext", static_cast<int>(ret));
+        aclrtResetDevice(device_id);
+        aclFinalize();
+        state.device_set = false;
+        state.acl_initialized = false;
+        return nullptr;
+    }
+
+    ret = aclrtSetCurrentContext(state.context);
+    if (!acl_ok(ret)) {
+        error = make_acl_error("aclrtSetCurrentContext", static_cast<int>(ret));
+        aclrtDestroyContext(state.context);
+        state.context = nullptr;
         aclrtResetDevice(device_id);
         aclFinalize();
         state.device_set = false;
@@ -184,6 +202,7 @@ void AclRuntimeSession::release() noexcept
     }
 
     if (state.context != nullptr) {
+        static_cast<void>(aclrtSetCurrentContext(state.context));
         aclrtDestroyContext(state.context);
         state.context = nullptr;
     }
