@@ -570,7 +570,7 @@ cmake --build build
 - `pipeline.detect_fps`
   推理线程从 latest frame buffer 取帧并提交推理的目标频率
 - `pipeline.stream_slots`
-  AscendCL 异步推理 slot 数量，取值范围 `1..10`，默认 `2`。该配置会同时控制推理 stream slot 数量和 DVPP 预处理 per-slot 临时资源数量；slot 过多会增加 Device 内存占用和 V4L2 loaned buffer 持有时间，不保证线性提速
+  AscendCL 异步推理 slot 数量，取值范围 `1..10`，默认 `2`。该配置会同时控制推理 stream slot 数量和 DVPP 预处理 per-slot 临时资源数量；当前单 NPU 开发板建议只测试 `1`、`2`、`4`，slot 过多会增加 Device 内存占用和 V4L2 loaned buffer 持有时间，不保证线性提速，极端值可能导致摄像头采集超时
 - `pipeline.output_queue_size`
   推理线程到输出线程的有界队列容量，队列满时丢弃最旧输出包
 - `preprocess.output_width` / `preprocess.output_height`

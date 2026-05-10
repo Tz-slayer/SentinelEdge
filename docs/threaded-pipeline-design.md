@@ -15,6 +15,11 @@ capture -> preprocess -> detect -> output
 - 输出线程异步消费推理线程发布的 `Frame + DetectionResult` 绑定包，不阻塞采集和推理。
 - 主链路默认围绕 `dvpp + loaned + static AIPP` 最优路径继续优化。
 
+当前设计目标是单路摄像头高性能闭环，不是多路摄像头实时并发。开发板只有一个
+NPU 计算资源池，AscendCL 多 stream 只能提供异步调度和有限重叠机会，不能把一个
+NPU 变成多个独立推理单元。性能测试中单路模型推理已经成为主瓶颈，因此多路实时接入
+会直接稀释每路检测帧率，并增加 V4L2 loaned buffer 和 Device buffer 压力。
+
 ## 线程划分
 
 第一版只拆三类线程：
@@ -59,7 +64,7 @@ OutputThread
 - 同一 slot 内必须保证 DVPP VPC 写完模型 input buffer 后，再执行 `aclmdlExecuteAsync`。
 - 推理线程处理不过来时，允许跳过旧帧，只处理最新帧。
 - 事件生成按实际处理帧推进，不以摄像头原始 30 FPS 作为强约束。
-- 当前实现允许配置 `stream_slots=1..10`，推荐先用 `2` 做基准，再逐步测试 `3`、`4`；slot 太多会增加 Device 内存占用和 V4L2 loaned buffer 持有时间。
+- 当前实现允许配置 `stream_slots=1..10`，但当前硬件建议只测试 `1`、`2`、`4`。slot 太多会增加 Device 内存占用和 V4L2 loaned buffer 持有时间，`9`、`10` 这类配置可能耗尽摄像头 mmap buffer 并导致采集超时。
 
 ### OutputThread
 
@@ -310,6 +315,7 @@ pipeline:
 - 如果 V4L2 buffer 数量太少，多个 busy stream slot 和输出线程持有帧可能影响采集。
 - AscendCL 和 DVPP 对多线程上下文敏感，第一版必须让推理调度和 slot 资源都留在同一个推理线程。
 - 多 stream 不保证线性加速；如果单设备已经被模型推理吃满，`stream_slots=2` 也可能收益有限。
+- 当前开发板只有一个 NPU 资源池，多路摄像头实时推理不会获得真正的硬件并发，只会在全局推理吞吐内分摊每路帧率。
 - 如果每次提交后立即 `aclrtSynchronizeStream()`，多 stream 会退化为串行。
 - debug 日志过多会影响性能，性能测试时应减少逐帧日志。
 - 多线程性能指标不能再简单用单线程 `frame_total_ms` 表示系统吞吐，需要同时看 capture、inference、output 三条线程的速率。
