@@ -162,20 +162,18 @@ scripts/run-board-dvpp-probe.sh build/board-native-debug-package /path/to/frame.
 当前阶段先只测试一条 pipeline，避免把 backend、输出通道和配置变更混在一起：
 
 ```bash
-scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
+scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/perf
 ```
 
-脚本会临时修改安装包中的 `sentinel.yaml`，强制开启 `performance.enabled`，设置
-`pipeline.max_frames` 和 `performance.csv_path`，运行结束后自动恢复原配置。默认输出：
+脚本会直接读取安装包中的 `config/perf/sentinel.yaml`，不会临时修改配置文件。默认输出：
 
-- 日志：`build/board-native-debug-package/data/dev/perf/pipeline.log`
-- CSV：`build/board-native-debug-package/data/dev/perf/pipeline.csv`
+- 日志：`build/board-native-debug-package/data/perf/pipeline.log`
+- CSV：`build/board-native-debug-package/data/perf/pipeline.csv`
 
-常用参数只保留这几个：
+测试变量通过 `config/perf/sentinel.yaml` 管理，避免脚本和配置文件同时控制同一参数：
 
 ```bash
-FRAMES=500 INTERVAL=50 \
-  scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
+scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/perf
 ```
 
 重点看 CSV 中的：

@@ -265,7 +265,7 @@ build/prod-package/
 - `bin/`
   生产可执行文件，例如 `video_sentinel` 和 `sentinel_camera_probe`
 - `config/`
-  完整配置目录，包含 `config/dev`、`config/prod` 和示例配置
+  完整配置目录，包含 `config/dev`、`config/prod`、`config/perf` 和示例配置
 - `models/`
   模型目录，目前只自动打包 `.om` 文件，不打包 `.onnx`、`.pt` 等训练或转换中间产物
 
@@ -528,12 +528,14 @@ cmake --build build
 
 ## 配置
 
-当前仓库提供两套实际配置目录：
+当前仓库提供三套实际配置目录：
 
 - `config/dev/`
   面向测试开发板调试，默认启用 `v4l2` 摄像头和 `ascendcl` 推理，日志输出到 `stderr`
 - `config/prod/`
   面向生产部署，默认启用 `v4l2` 摄像头和 `ascendcl` 推理，日志输出到 `syslog`
+- `config/perf/`
+  面向性能测试，默认关闭视频输出、开启性能 CSV，所有测试变量都在该目录的配置文件中维护
 - `tests/fixtures/mock_config/`
   仅用于本机单元测试，保留 mock 摄像头和 mock 推理
 
@@ -643,6 +645,6 @@ cmake --build build
 - `scripts/run-board-mjpeg-preview.sh`
   临时启用 MJPEG 预览并运行 `video_sentinel`
 - `scripts/run-board-pipeline-perf.sh`
-  只运行当前配置中的一条 pipeline，并生成一份性能日志和一份 CSV
+  使用 `config/perf` 运行一条固定性能测试 pipeline，并生成一份性能日志和一份 CSV
 - `scripts/run-board-dvpp-probe.sh`
   在开发板上运行 `sentinel_dvpp_probe`，验证 DVPP runtime 和可选 JPEG 预处理

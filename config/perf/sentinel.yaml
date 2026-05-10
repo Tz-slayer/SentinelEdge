@@ -1,0 +1,58 @@
+service:
+  host: "0.0.0.0"
+  port: 8080
+
+logging:
+  backend: "stderr"
+  level: "info"
+  ident: "video_sentinel_perf"
+
+inference:
+  backend: "ascendcl"
+  model_path: "models/yolo/yolo26n_aipp_nv12.om"
+  device_id: 0
+
+preprocess:
+  output_width: 640
+  output_height: 640
+  output_layout: "NV12"
+  output_dtype: "UINT8"
+  normalize: false
+
+postprocess:
+  model_type: "yolo"
+  output_layout: "channels_first"
+  num_classes: 80
+  confidence_threshold: 0.25
+  nms_iou_threshold: 0.45
+  max_detections: 100
+  merge_coco_vehicles: true
+
+overlay:
+  enabled: true
+
+output:
+  video_sink: "none"
+  debug_image_dir: "debug/frames"
+  debug_image_interval: 30
+  mjpeg_host: "0.0.0.0"
+  mjpeg_port: 8081
+  mjpeg_path: "/stream"
+  mjpeg_quality: 80
+  mjpeg_max_clients: 4
+
+performance:
+  enabled: true
+  log_interval_frames: 30
+  csv_path: "pipeline.csv"
+
+runtime:
+  data_dir: "./data/perf"
+
+pipeline:
+  backend: "dvpp"
+  mode: "threaded"
+  max_frames: 300
+  detect_fps: 30
+  stream_slots: 2
+  output_queue_size: 2

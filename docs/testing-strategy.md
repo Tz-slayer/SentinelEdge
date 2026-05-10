@@ -165,16 +165,23 @@ latency_fps
 
 ```bash
 scripts/board-native-build.sh
-scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
+scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/perf
 scripts/run-board-mjpeg-preview.sh build/board-native-debug-package config/dev
 ```
 
-`run-board-pipeline-perf.sh` 只运行当前主线 pipeline，并把日志和 CSV 写到
-安装包的 `data/dev/perf/` 目录。常用环境变量只保留测试帧数和聚合间隔：
+`run-board-pipeline-perf.sh` 只运行 `config/perf` 中定义的主线 pipeline，并把日志和 CSV 写到
+安装包的 `data/perf/` 目录。性能测试参数统一写在
+`config/perf/sentinel.yaml` 中，脚本不再临时修改配置文件。
 
-```bash
-FRAMES=300 INTERVAL=30 \
-  scripts/run-board-pipeline-perf.sh build/board-native-debug-package config/dev
+```yaml
+performance:
+  log_interval_frames: 30
+  csv_path: "pipeline.csv"
+
+pipeline:
+  max_frames: 300
+  detect_fps: 30
+  stream_slots: 2
 ```
 
 ## 当前缺口
