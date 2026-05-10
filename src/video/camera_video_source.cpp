@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include <fcntl.h>
@@ -18,13 +19,26 @@ namespace {
 
 /**
  * @brief 默认申请的 V4L2 流式缓冲区数量。
+ *
+ * 线程化主链路会同时持有 latest frame、两个推理 slot 和调试输出队列中的帧。
+ * 这里申请 8 个缓冲区，避免 loaned 帧跨线程持有时把驱动队列耗尽。
  */
-constexpr int kBufferCount = 4;
+constexpr int kBufferCount = 8;
 
 /**
  * @brief 等待摄像头帧到达时使用的 `poll` 超时时间，单位毫秒。
  */
 constexpr int kPollTimeoutMs = 2000;
+
+/**
+ * @brief poll 异常唤醒后进行短暂重试的次数。
+ */
+constexpr int kPollTransientRetryCount = 5;
+
+/**
+ * @brief poll 异常唤醒后的单次重试等待时间，单位毫秒。
+ */
+constexpr int kPollTransientRetryMs = 20;
 
 /**
  * @brief 将 `timeval` 转换为纳秒时间戳。
@@ -51,6 +65,36 @@ int xioctl_noexcept(int fd, unsigned long request, void* arg) noexcept
         result = ::ioctl(fd, request, arg);
     } while (result == -1 && errno == EINTR);
     return result;
+}
+
+/**
+ * @brief 将 `pollfd::revents` 转换为可读文本。
+ * @param revents `poll` 返回的事件位。
+ * @return 事件位文本，用于定位 V4L2 驱动状态。
+ */
+std::string poll_revents_to_string(short revents)
+{
+    if (revents == 0) {
+        return "0";
+    }
+
+    std::string text;
+    const auto append = [&](short flag, const char* name) {
+        if ((revents & flag) != 0) {
+            if (!text.empty()) {
+                text += "|";
+            }
+            text += name;
+        }
+    };
+
+    append(POLLIN, "POLLIN");
+    append(POLLRDNORM, "POLLRDNORM");
+    append(POLLPRI, "POLLPRI");
+    append(POLLERR, "POLLERR");
+    append(POLLHUP, "POLLHUP");
+    append(POLLNVAL, "POLLNVAL");
+    return text.empty() ? std::to_string(revents) : text;
 }
 
 } // namespace
@@ -199,21 +243,28 @@ std::optional<Frame> CameraVideoSource::read_frame()
         return std::nullopt;
     }
 
-    if (!wait_for_frame()) {
-        return std::nullopt;
-    }
-
     v4l2_buffer buffer {};
-    buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buffer.memory = V4L2_MEMORY_MMAP;
-
-    // 先从驱动队列中取出一块已经写满数据的缓冲区。
-    if (xioctl(fd_, VIDIOC_DQBUF, &buffer) == -1) {
-        if (errno == EAGAIN) {
+    for (int attempt = 0; attempt <= kPollTransientRetryCount; ++attempt) {
+        if (!wait_for_frame()) {
             return std::nullopt;
         }
-        set_error_from_errno("VIDIOC_DQBUF failed");
-        return std::nullopt;
+
+        buffer = v4l2_buffer {};
+        buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buffer.memory = V4L2_MEMORY_MMAP;
+
+        // 先从驱动队列中取出一块已经写满数据的缓冲区。
+        if (xioctl(fd_, VIDIOC_DQBUF, &buffer) == 0) {
+            break;
+        }
+        if (errno != EAGAIN) {
+            set_error_from_errno("VIDIOC_DQBUF failed");
+            return std::nullopt;
+        }
+        if (attempt == kPollTransientRetryCount) {
+            last_error_ = "VIDIOC_DQBUF returned EAGAIN after poll retries";
+            return std::nullopt;
+        }
     }
 
     if (buffer.index >= buffers_.size()) {
@@ -421,26 +472,45 @@ void CameraVideoSource::release_buffers() noexcept
  */
 bool CameraVideoSource::wait_for_frame()
 {
-    pollfd descriptor {};
-    descriptor.fd = fd_;
-    descriptor.events = POLLIN;
+    for (int attempt = 0; attempt <= kPollTransientRetryCount; ++attempt) {
+        pollfd descriptor {};
+        descriptor.fd = fd_;
+        descriptor.events = POLLIN | POLLRDNORM;
 
-    // 采集循环不做忙等，而是通过 poll 等待驱动通知有帧可取。
-    const auto ready = ::poll(&descriptor, 1, kPollTimeoutMs);
-    if (ready == -1) {
-        set_error_from_errno("poll failed");
-        return false;
-    }
-    if (ready == 0) {
-        last_error_ = "poll timed out while waiting for a camera frame";
-        return false;
-    }
-    if ((descriptor.revents & POLLIN) == 0) {
-        last_error_ = "camera poll returned without POLLIN";
-        return false;
+        const auto timeout = attempt == 0 ? kPollTimeoutMs : kPollTransientRetryMs;
+        // 采集循环不做忙等，而是通过 poll 等待驱动通知有帧可取。
+        const auto ready = ::poll(&descriptor, 1, timeout);
+        if (ready == -1) {
+            set_error_from_errno("poll failed");
+            return false;
+        }
+        if (ready == 0) {
+            if (attempt == 0) {
+                last_error_ = "poll timed out while waiting for a camera frame";
+                return false;
+            }
+            continue;
+        }
+        if ((descriptor.revents & (POLLIN | POLLRDNORM)) != 0) {
+            return true;
+        }
+        if ((descriptor.revents & POLLNVAL) != 0 || (descriptor.revents & POLLHUP) != 0) {
+            last_error_ = "camera poll fatal event without POLLIN revents=" +
+                          poll_revents_to_string(descriptor.revents);
+            return false;
+        }
+
+        // 某些 UVC/V4L2 驱动在用户态持有 loaned buffer 较多时会短暂返回 POLLERR。
+        // 给推理线程一点时间释放帧租约，而不是立刻把采集线程判定为失败。
+        if (attempt == kPollTransientRetryCount) {
+            last_error_ = "camera poll returned without POLLIN revents=" +
+                          poll_revents_to_string(descriptor.revents);
+            return false;
+        }
     }
 
-    return true;
+    last_error_ = "camera poll returned without readable frame";
+    return false;
 }
 
 /**
