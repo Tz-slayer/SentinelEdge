@@ -578,7 +578,7 @@ cmake --build build
 - `overlay.enabled`
   是否在输出图像上绘制检测框
 - `output.video_sink`
-  视频结果输出通道，当前支持 `none`、`debug_image` 和 `mjpeg`
+  视频结果输出通道，当前支持 `none`、`debug_image` 和 `mjpeg`。生产配置使用 `none` 时不会启动输出线程，也不会跨线程继续持有帧
 - `output.debug_image_dir`
   `debug_image` 输出目录，相对于 `runtime.data_dir`
 - `output.debug_image_interval`

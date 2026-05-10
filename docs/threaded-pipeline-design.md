@@ -325,7 +325,7 @@ pipeline:
 5. `threaded` 模式下固定单摄像头、单推理调度线程、单输出线程。
 6. 推理线程内部先固定 `stream_slots=2`，每个 slot 独占一条 AscendCL stream、一套模型输入 Device buffer 和一套模型输出 Device buffer。
 7. 输出线程第一版只消费 `PipelineOutputPacket{Frame, DetectionResult}`，保证帧和框严格匹配。
-8. `video_sink=none` 时仍经过输出线程和空输出策略，便于先验证三线程生命周期；后续性能收敛时可把该路径优化为不跨线程持有 `Frame`。
+8. `video_sink=none` 时不启动输出线程，也不把 `Frame` 放入输出队列；推理线程完成事件和统计后立即释放帧租约，减少 V4L2 buffer 占用时间。
 9. 性能报告增加：
    - captured FPS
    - submitted FPS

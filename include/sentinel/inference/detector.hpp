@@ -97,6 +97,21 @@ public:
     }
 
     /**
+     * @brief 返回指定异步 slot 的原生执行流句柄。
+     * @param slot_index 异步 slot 下标。
+     * @return 支持硬件异步串联时返回原生 stream 指针，否则返回空指针。
+     *
+     * 该接口用于让 DVPP 预处理和 AscendCL 推理排入同一条 stream。
+     * 上层只能把该值作为不透明句柄传给硬件预处理策略，不拥有该资源，
+     * 也不能跨线程销毁或缓存到 slot 生命周期之外。
+     */
+    virtual void* native_stream_for_slot(std::size_t slot_index) noexcept
+    {
+        static_cast<void>(slot_index);
+        return nullptr;
+    }
+
+    /**
      * @brief 向指定异步 slot 提交一次模型推理。
      * @param slot_index 异步 slot 下标。
      * @param tensor 已完成预处理的模型输入张量。

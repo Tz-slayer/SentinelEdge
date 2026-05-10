@@ -449,6 +449,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
     std::mutex error_mutex;
     std::string thread_error;
     PipelineResult result;
+    const bool output_enabled = config.output.video_sink != "none";
 
     const auto request_stop = [&]() {
         stop.store(true);
@@ -617,10 +618,12 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                     }
                 }
 
-                output_queue.push(PipelineOutputPacket{
-                    std::move(slot.captured.frame),
-                    std::move(async_result->detections),
-                });
+                if (output_enabled) {
+                    output_queue.push(PipelineOutputPacket{
+                        std::move(slot.captured.frame),
+                        std::move(async_result->detections),
+                    });
+                }
                 slot.captured = CapturedFramePacket{};
                 slot.preprocess_ms = 0.0;
                 return true;
@@ -662,8 +665,15 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                             set_thread_error("detector slot input tensor unavailable");
                             return;
                         }
-                        auto processed = preprocessor->process_into(slot.captured.frame,
-                                                                    std::move(*target_tensor));
+                        auto* native_stream = detector->native_stream_for_slot(slot_index);
+                        if (native_stream == nullptr) {
+                            set_thread_error("detector native stream unavailable for slot");
+                            return;
+                        }
+                        auto processed = preprocessor->process_into_slot(slot.captured.frame,
+                                                                         std::move(*target_tensor),
+                                                                         slot_index,
+                                                                         native_stream);
                         preprocess_ms = elapsed_ms_since(preprocess_start);
                         if (!processed.has_value()) {
                             set_thread_error("frame preprocessor failed: " +
@@ -724,39 +734,46 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
         }
     });
 
-    std::thread output_thread([&]() {
-        try {
-            auto video_sink = create_video_sink(config.output, config.overlay, config.service);
-            logger.info("open video sink type=" + std::string(video_sink->kind()) +
-                        " overlay=" + (config.overlay.enabled ? "enabled" : "disabled") +
-                        " overlay_backend=" + config.overlay.backend);
-            if (!video_sink->open()) {
-                set_thread_error("unable to open " + std::string(video_sink->kind()) +
-                                 " video sink: " + std::string(video_sink->last_error()));
-                return;
-            }
-
-            while (true) {
-                auto packet = output_queue.pop();
-                if (!packet.has_value()) {
-                    break;
+    std::thread output_thread;
+    if (output_enabled) {
+        output_thread = std::thread([&]() {
+            try {
+                auto video_sink = create_video_sink(config.output, config.overlay, config.service);
+                logger.info("open video sink type=" + std::string(video_sink->kind()) +
+                            " overlay=" + (config.overlay.enabled ? "enabled" : "disabled") +
+                            " overlay_backend=" + config.overlay.backend);
+                if (!video_sink->open()) {
+                    set_thread_error("unable to open " + std::string(video_sink->kind()) +
+                                     " video sink: " + std::string(video_sink->last_error()));
+                    return;
                 }
-                if (!video_sink->write(packet->frame, packet->detections)) {
-                    set_thread_error("video sink failed: " +
-                                     std::string(video_sink->last_error()));
-                    break;
-                }
-            }
 
-            video_sink->close();
-        } catch (const std::exception& error) {
-            set_thread_error("output thread failed: " + std::string(error.what()));
-        }
-    });
+                while (true) {
+                    auto packet = output_queue.pop();
+                    if (!packet.has_value()) {
+                        break;
+                    }
+                    if (!video_sink->write(packet->frame, packet->detections)) {
+                        set_thread_error("video sink failed: " +
+                                         std::string(video_sink->last_error()));
+                        break;
+                    }
+                }
+
+                video_sink->close();
+            } catch (const std::exception& error) {
+                set_thread_error("output thread failed: " + std::string(error.what()));
+            }
+        });
+    } else {
+        logger.info("video sink disabled, inference thread releases frames after result handling");
+    }
 
     capture_thread.join();
     inference_thread.join();
-    output_thread.join();
+    if (output_thread.joinable()) {
+        output_thread.join();
+    }
 
     {
         std::lock_guard<std::mutex> lock(error_mutex);

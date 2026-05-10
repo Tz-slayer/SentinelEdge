@@ -22,6 +22,7 @@ V4L2 MJPEG loaned buffer
 - 输入：V4L2 MJPEG 帧，推荐来自 `loaned` 缓冲区。
 - 输出：静态 AIPP 模型消费的 `NV12` / `UINT8`。
 - 优先路径：通过 `process_into()` 直接写入 AscendCL detector 暴露的 Device 输入缓冲区。
+- 线程化路径：通过 `process_into_slot()` 复用对应 slot 的 DVPP 临时资源，并把 JPEGD/VPC 排入 detector 暴露的同一条 AscendCL stream。
 - 回退路径：当 detector 未提供 Device 输入时，输出 Host NV12 缓冲区，仅用于诊断和兼容。
 
 `DetectionPostprocessor` 负责把模型输出解析为检测框。当前 `DvppYoloPostprocessor` 名称表示它属于 DVPP 主配置链路，但 YOLO decode/NMS 是纯 C++ CPU 逻辑，DVPP 本身不执行 NMS。

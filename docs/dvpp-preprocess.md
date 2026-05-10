@@ -17,6 +17,10 @@ V4L2 MJPEG Frame
 DVPP VPC 会直接写入该 buffer，detector 执行时跳过输入 Host->Device 拷贝。
 DVPP 预处理器会在 `open()` 后复用 JPEGD 输出 Device buffer、Host fallback 的 VPC 输出
 Device buffer、`acldvppPicDesc` 和 `acldvppResizeConfig`，避免在主循环内按帧创建和销毁这些资源。
+在线程化主链路中，`process_into_slot()` 会为每个推理 slot 复用独立的 JPEGD 输出
+Device buffer、图片描述和 resize 配置，并把 JPEGD、VPC、模型推理排入同一条
+AscendCL stream。这样预处理阶段不再提前 `aclrtSynchronizeStream()`，stream 内顺序保证
+VPC 写完模型输入后再执行推理。
 用于 `debug_image` / `mjpeg` 的 DVPP 图像后端也会复用 JPEGD 输出 Device buffer、
 Host NV12 缓冲区和 `acldvppPicDesc`。
 
@@ -63,9 +67,12 @@ V4L2 loaned MJPEG payload
 - `camera.buffer_mode: "loaned"` 避免 V4L2 `mmap` 缓冲区到 `Frame::data` 的用户态复制。
 - `Detector::mutable_input_tensor()` 暴露 AscendCL 模型输入 Device buffer 视图。
 - `FramePreprocessor::process_into()` 允许 DVPP 预处理直接写入调用方提供的目标张量。
+- `FramePreprocessor::process_into_slot()` 允许 DVPP 预处理使用与推理 slot 相同的 AscendCL stream，避免预处理阶段同步。
 - `DvppFramePreprocessor` 在静态 AIPP 路径下让 VPC 输出直接落到模型输入 Device buffer。
 - `AscendClDetector::detect()` 收到同一块模型输入 Device buffer 时跳过输入拷贝；收到其他 Device buffer 时只做 Device-to-Device 拷贝。
+- `AscendClDetector::submit_async()` 在同一 stream 中排在 DVPP JPEGD/VPC 之后提交模型推理，`collect_async()` 统一同步该 slot 并回收结果。
 - `DvppFramePreprocessor` 复用 JPEGD 输出 Device buffer、Host fallback 的 VPC 输出 Device buffer、`acldvppPicDesc` 和 `acldvppResizeConfig`。
+- `DvppFramePreprocessor` 在线程化路径中为 2 个 stream slot 隔离复用 DVPP 临时资源，避免异步挂起任务互相覆盖。
 - `DvppImageBackend` 复用调试输出链路的 JPEGD 输出 Device buffer、Host NV12 缓冲区和 `acldvppPicDesc`。
 - debug 日志会打印模型输入张量 `memory=host/device`，用于确认当前是否走到 Device buffer 直写路径。
 
@@ -79,6 +86,7 @@ V4L2 loaned MJPEG payload
 - 使用静态 AIPP OM 时，NV12 到 RGB、归一化等动作由模型内 AIPP 完成，不再由 CPU 打包 NCHW FP32。
 - 静态 AIPP 路径下，DVPP VPC 输出会直接写入 AscendCL 模型输入 Device buffer，避免 `DVPP -> Host -> AscendCL input` 往返拷贝。
 - JPEGD 输出 Device buffer、Host fallback resize buffer、DVPP PicDesc 和 ResizeConfig 已复用，不再按帧申请释放。
+- 线程化主链路中，DVPP 预处理和 AscendCL 推理使用同一条 slot stream，预处理提交后不单独同步。
 - DVPP 图像后端的调试输出链路已复用 JPEGD buffer、Host NV12 buffer 和 PicDesc。
 - DVPP 画框链路的解码使用 DVPP，但画框当前在 Host BGR24 缓冲区上完成，不是 DVPP OSD。
 - `mjpeg` 和 `debug_image` 输出最终 JPEG 编码仍复用当前 OpenCV 输出实现。

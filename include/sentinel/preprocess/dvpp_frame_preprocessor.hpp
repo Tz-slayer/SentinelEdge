@@ -2,6 +2,7 @@
 
 #include "sentinel/preprocess/frame_preprocessor.hpp"
 
+#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -52,6 +53,19 @@ public:
      * @return 成功返回目标张量；失败返回空。
      */
     std::optional<TensorBuffer> process_into(const Frame& frame, TensorBuffer target) override;
+
+    /**
+     * @brief 将 MJPEG 帧排入指定 slot 的 DVPP 预处理资源。
+     * @param frame 视频源输出的原始帧。
+     * @param target 目标张量；静态 AIPP 路径下必须为 AscendCL Device 输入缓冲区。
+     * @param slot_index 推理 slot 下标，用于隔离 JPEGD/VPC 临时缓冲区和描述符。
+     * @param native_stream 对应推理 slot 的 AscendCL stream。
+     * @return 成功返回目标张量；失败返回空。
+     */
+    std::optional<TensorBuffer> process_into_slot(const Frame& frame,
+                                                  TensorBuffer target,
+                                                  std::size_t slot_index,
+                                                  void* native_stream) override;
 
     /**
      * @brief 返回预处理策略类型标识。

@@ -2,8 +2,10 @@
 
 #include "sentinel/common/types.hpp"
 
+#include <cstddef>
 #include <optional>
 #include <string_view>
+#include <utility>
 
 namespace sentinel {
 
@@ -58,6 +60,28 @@ public:
     {
         static_cast<void>(target);
         return process(frame);
+    }
+
+    /**
+     * @brief 将一帧视频数据转换到指定 slot 的目标张量。
+     * @param frame 视频源输出的原始帧。
+     * @param target 目标张量缓冲区，通常是对应推理 slot 的 Device 输入。
+     * @param slot_index 推理 slot 下标，用于选择预处理阶段的独占临时资源。
+     * @param native_stream 原生硬件 stream 句柄；为空时实现可回退到同步路径。
+     * @return 成功提交或完成预处理时返回张量；失败返回空并更新 `last_error()`。
+     *
+     * 支持硬件异步串联的实现可以把预处理任务排入 `native_stream` 后立即返回，
+     * 由同一条 stream 上后续推理任务保持执行顺序。调用方必须保证 `Frame`
+     * 及其 loaned 载荷在该 stream 同步完成前仍然存活。
+     */
+    virtual std::optional<TensorBuffer> process_into_slot(const Frame& frame,
+                                                          TensorBuffer target,
+                                                          std::size_t slot_index,
+                                                          void* native_stream)
+    {
+        static_cast<void>(slot_index);
+        static_cast<void>(native_stream);
+        return process_into(frame, std::move(target));
     }
 
     /**

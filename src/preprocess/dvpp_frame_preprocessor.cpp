@@ -2,6 +2,7 @@
 
 #include "sentinel/ascend/acl_runtime.hpp"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -30,6 +31,11 @@ bool wants_nv12_tensor(const PreprocessConfig& config) noexcept
 }
 
 #if SENTINEL_ENABLE_DVPP
+
+/**
+ * @brief 当前主线固定使用的 DVPP 异步预处理 slot 数量。
+ */
+constexpr std::size_t kDvppPreprocessSlotCount = 2;
 
 /**
  * @brief 将数值向上对齐到指定粒度。
@@ -272,6 +278,19 @@ void synchronize_stream_before_releasing_async_buffers(aclrtStream stream) noexc
     }
 }
 
+/**
+ * @brief DVPP 异步预处理 slot 独占资源。
+ *
+ * 每个推理 stream slot 对应一套 JPEGD 输出缓冲区、图片描述和 resize 配置，
+ * 这样两个 stream 并发挂起时不会复用同一块临时 Device 内存或描述符。
+ */
+struct DvppPreprocessSlot {
+    DeviceMemory decode_output;
+    std::unique_ptr<DvppPicDesc> decode_desc;
+    std::unique_ptr<DvppPicDesc> device_resize_desc;
+    std::unique_ptr<DvppResizeConfig> resize_config;
+};
+
 #endif
 
 } // namespace
@@ -360,6 +379,17 @@ public:
             close();
             return false;
         }
+        for (auto& slot : preprocess_slots_) {
+            slot.decode_desc = std::make_unique<DvppPicDesc>();
+            slot.device_resize_desc = std::make_unique<DvppPicDesc>();
+            slot.resize_config = std::make_unique<DvppResizeConfig>();
+            if (!slot.decode_desc->valid() || !slot.device_resize_desc->valid() ||
+                !slot.resize_config->valid()) {
+                last_error_ = "failed to create per-slot DVPP descriptors";
+                close();
+                return false;
+            }
+        }
 
         last_error_.clear();
         return true;
@@ -384,6 +414,12 @@ public:
         resize_config_.reset();
         decode_output_.reset();
         host_resize_output_.reset();
+        for (auto& slot : preprocess_slots_) {
+            slot.decode_desc.reset();
+            slot.device_resize_desc.reset();
+            slot.resize_config.reset();
+            slot.decode_output.reset();
+        }
         if (channel_created_) {
             acldvppDestroyChannel(channel_desc_);
             channel_created_ = false;
@@ -707,6 +743,168 @@ public:
     }
 
     /**
+     * @brief 将 MJPEG 帧排入指定外部 stream 并直接写入目标 Device 张量。
+     * @param frame 视频源输出的原始帧。
+     * @param target 目标 Device 张量。
+     * @param slot_index 预处理 slot 下标。
+     * @param native_stream 对应推理 slot 的 AscendCL stream。
+     * @return 成功排队返回目标张量；失败返回空。
+     */
+    std::optional<TensorBuffer> process_into_slot(const Frame& frame,
+                                                  TensorBuffer target,
+                                                  std::size_t slot_index,
+                                                  void* native_stream)
+    {
+#if SENTINEL_ENABLE_DVPP
+        if (native_stream == nullptr) {
+            return process_into(frame, std::move(target));
+        }
+        if (slot_index >= preprocess_slots_.size()) {
+            last_error_ = "DVPP preprocess slot index out of range: " +
+                          std::to_string(slot_index);
+            return std::nullopt;
+        }
+        if (!target.is_device()) {
+            return process_into(frame, std::move(target));
+        }
+        if (target.device_data == nullptr || target.device_bytes == 0U) {
+            last_error_ = "target device tensor is empty";
+            return std::nullopt;
+        }
+        if (channel_desc_ == nullptr) {
+            last_error_ = "DVPP preprocessor is not open";
+            return std::nullopt;
+        }
+        if (!is_mjpeg_frame(frame)) {
+            last_error_ = "DVPP slot preprocessor currently supports only MJPEG frames";
+            return std::nullopt;
+        }
+
+        const auto* payload = frame.payload_data();
+        const auto payload_size = frame.payload_size();
+        if (payload == nullptr || payload_size == 0U) {
+            last_error_ = "input frame is empty";
+            return std::nullopt;
+        }
+        if (payload_size > std::numeric_limits<std::uint32_t>::max()) {
+            last_error_ = "input frame is too large for DVPP JPEGD";
+            return std::nullopt;
+        }
+
+        std::uint32_t source_width = 0;
+        std::uint32_t source_height = 0;
+        int32_t components = 0;
+        auto ret = acldvppJpegGetImageInfo(payload,
+                                           static_cast<std::uint32_t>(payload_size),
+                                           &source_width,
+                                           &source_height,
+                                           &components);
+        if (!acl_ok(ret)) {
+            last_error_ = make_acl_error("acldvppJpegGetImageInfo", static_cast<int>(ret));
+            return std::nullopt;
+        }
+        if (source_width == 0U || source_height == 0U) {
+            last_error_ = "acldvppJpegGetImageInfo returned empty image size";
+            return std::nullopt;
+        }
+
+        std::uint32_t decode_size = 0;
+        ret = acldvppJpegPredictDecSize(payload,
+                                        static_cast<std::uint32_t>(payload_size),
+                                        PIXEL_FORMAT_YUV_SEMIPLANAR_420,
+                                        &decode_size);
+        if (!acl_ok(ret)) {
+            last_error_ = make_acl_error("acldvppJpegPredictDecSize", static_cast<int>(ret));
+            return std::nullopt;
+        }
+
+        auto& slot = preprocess_slots_[slot_index];
+        if (!slot.decode_output.ensure_size(decode_size, last_error_)) {
+            return std::nullopt;
+        }
+
+        const auto decode_width_stride = align_up(source_width, 128U);
+        const auto decode_height_stride = align_up(source_height, 16U);
+        if (slot.decode_desc == nullptr || !slot.decode_desc->valid() ||
+            !setup_pic_desc(slot.decode_desc->get(),
+                            slot.decode_output.data(),
+                            decode_size,
+                            source_width,
+                            source_height,
+                            decode_width_stride,
+                            decode_height_stride)) {
+            return std::nullopt;
+        }
+
+        const auto output_width = static_cast<std::uint32_t>(config_.output_width);
+        const auto output_height = static_cast<std::uint32_t>(config_.output_height);
+        const auto output_width_stride = align_up(output_width, 16U);
+        const auto output_height_stride = align_up(output_height, 2U);
+        const auto resize_size = yuv420sp_size(output_width_stride, output_height_stride);
+        if (target.device_bytes != resize_size ||
+            resize_size > std::numeric_limits<std::uint32_t>::max()) {
+            last_error_ = "target device tensor bytes mismatch for NV12 resize output: expected " +
+                          std::to_string(resize_size) + ", got " +
+                          std::to_string(target.device_bytes);
+            return std::nullopt;
+        }
+
+        if (slot.device_resize_desc == nullptr || !slot.device_resize_desc->valid() ||
+            !setup_pic_desc(slot.device_resize_desc->get(),
+                            target.device_data,
+                            static_cast<std::uint32_t>(target.device_bytes),
+                            output_width,
+                            output_height,
+                            output_width_stride,
+                            output_height_stride)) {
+            return std::nullopt;
+        }
+        if (slot.resize_config == nullptr || !slot.resize_config->valid()) {
+            last_error_ = "acldvppCreateResizeConfig failed";
+            return std::nullopt;
+        }
+
+        auto* stream = static_cast<aclrtStream>(native_stream);
+        // JPEGD、VPC 和后续模型推理排到同一条 stream，依赖顺序由硬件队列保证。
+        ret = acldvppJpegDecodeAsync(channel_desc_,
+                                     payload,
+                                     static_cast<std::uint32_t>(payload_size),
+                                     slot.decode_desc->get(),
+                                     stream);
+        if (!acl_ok(ret)) {
+            last_error_ = make_acl_error("acldvppJpegDecodeAsync", static_cast<int>(ret));
+            return std::nullopt;
+        }
+
+        ret = acldvppVpcResizeAsync(channel_desc_,
+                                    slot.decode_desc->get(),
+                                    slot.device_resize_desc->get(),
+                                    slot.resize_config->get(),
+                                    stream);
+        if (!acl_ok(ret)) {
+            last_error_ = make_acl_error("acldvppVpcResizeAsync", static_cast<int>(ret));
+            synchronize_stream_before_releasing_async_buffers(stream);
+            return std::nullopt;
+        }
+
+        target.shape = {1, 1, config_.output_height, config_.output_width};
+        target.layout = config_.output_layout;
+        target.dtype = config_.output_dtype;
+        target.frame_sequence = frame.sequence;
+        target.camera_id = frame.camera_id;
+        last_error_.clear();
+        return target;
+#else
+        static_cast<void>(frame);
+        static_cast<void>(target);
+        static_cast<void>(slot_index);
+        static_cast<void>(native_stream);
+        last_error_ = "DVPP preprocessor is not enabled at build time";
+        return std::nullopt;
+#endif
+    }
+
+    /**
      * @brief 返回最近一次错误文本。
      * @return 错误文本。
      */
@@ -770,6 +968,7 @@ private:
     std::unique_ptr<DvppPicDesc> host_resize_desc_;
     std::unique_ptr<DvppPicDesc> device_resize_desc_;
     std::unique_ptr<DvppResizeConfig> resize_config_;
+    std::array<DvppPreprocessSlot, kDvppPreprocessSlotCount> preprocess_slots_;
 #endif
 };
 
@@ -831,6 +1030,24 @@ std::optional<TensorBuffer> DvppFramePreprocessor::process_into(const Frame& fra
                                                                 TensorBuffer target)
 {
     auto tensor = impl_->process_into(frame, std::move(target));
+    last_error_ = impl_->last_error();
+    return tensor;
+}
+
+/**
+ * @brief 将视频帧转换并排入指定 slot 的外部 stream。
+ * @param frame 视频源输出的原始帧。
+ * @param target 目标张量，静态 AIPP 路径下为对应推理 slot 的 Device 输入。
+ * @param slot_index 推理 slot 下标。
+ * @param native_stream 对应推理 slot 的 AscendCL stream。
+ * @return 成功返回已提交写入的张量；失败返回空。
+ */
+std::optional<TensorBuffer> DvppFramePreprocessor::process_into_slot(const Frame& frame,
+                                                                     TensorBuffer target,
+                                                                     std::size_t slot_index,
+                                                                     void* native_stream)
+{
+    auto tensor = impl_->process_into_slot(frame, std::move(target), slot_index, native_stream);
     last_error_ = impl_->last_error();
     return tensor;
 }

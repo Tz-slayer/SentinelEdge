@@ -161,6 +161,17 @@ std::optional<TensorBuffer> AscendClDetector::mutable_input_tensor_for_slot(
 }
 
 /**
+ * @brief 占位实现不提供原生 stream。
+ * @param slot_index 异步 slot 下标。
+ * @return 固定返回空指针。
+ */
+void* AscendClDetector::native_stream_for_slot(std::size_t slot_index) noexcept
+{
+    static_cast<void>(slot_index);
+    return nullptr;
+}
+
+/**
  * @brief 占位实现不支持异步提交。
  * @param slot_index 异步 slot 下标。
  * @param tensor 输入张量。

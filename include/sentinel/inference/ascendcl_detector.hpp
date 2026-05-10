@@ -74,6 +74,13 @@ public:
         std::size_t slot_index) override;
 
     /**
+     * @brief 返回指定异步 slot 的 AscendCL stream。
+     * @param slot_index 异步 slot 下标。
+     * @return slot 存在时返回 `aclrtStream` 的不透明指针，否则返回空指针。
+     */
+    void* native_stream_for_slot(std::size_t slot_index) noexcept override;
+
+    /**
      * @brief 向指定 AscendCL stream slot 提交异步推理。
      * @param slot_index 异步 slot 下标。
      * @param tensor 已完成预处理的模型输入张量。

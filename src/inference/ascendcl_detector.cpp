@@ -280,6 +280,19 @@ public:
     }
 
     /**
+     * @brief 返回指定 slot 的 AscendCL stream 句柄。
+     * @param slot_index 异步 slot 下标。
+     * @return slot 存在时返回 stream，不存在返回空指针。
+     */
+    void* native_stream_for_slot(std::size_t slot_index) noexcept
+    {
+        if (slot_index >= slots_.size()) {
+            return nullptr;
+        }
+        return slots_[slot_index].stream;
+    }
+
+    /**
      * @brief 向指定 slot 提交异步推理。
      * @param slot_index 异步 slot 下标。
      * @param tensor 已完成预处理的输入张量。
@@ -737,6 +750,16 @@ std::optional<TensorBuffer> AscendClDetector::mutable_input_tensor_for_slot(
     std::size_t slot_index)
 {
     return impl_->mutable_input_tensor_for_slot(metadata, slot_index);
+}
+
+/**
+ * @brief 返回指定异步 slot 的 AscendCL stream。
+ * @param slot_index 异步 slot 下标。
+ * @return slot 存在时返回 `aclrtStream` 的不透明指针，否则返回空指针。
+ */
+void* AscendClDetector::native_stream_for_slot(std::size_t slot_index) noexcept
+{
+    return impl_->native_stream_for_slot(slot_index);
 }
 
 /**
