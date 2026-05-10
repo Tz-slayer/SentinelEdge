@@ -59,7 +59,7 @@ OutputThread
 - 同一 slot 内必须保证 DVPP VPC 写完模型 input buffer 后，再执行 `aclmdlExecuteAsync`。
 - 推理线程处理不过来时，允许跳过旧帧，只处理最新帧。
 - 事件生成按实际处理帧推进，不以摄像头原始 30 FPS 作为强约束。
-- 第一版推荐 `stream_slots=2`，确认有效后再测试 3；slot 太多会增加 Device 内存占用和 V4L2 loaned buffer 持有时间。
+- 当前实现允许配置 `stream_slots=1..10`，推荐先用 `2` 做基准，再逐步测试 `3`、`4`；slot 太多会增加 Device 内存占用和 V4L2 loaned buffer 持有时间。
 
 ### OutputThread
 
@@ -283,7 +283,7 @@ pipeline:
 含义：
 
 - `detect_fps`：推理线程从 latest frame slot 取帧并提交推理的目标频率。
-- `stream_slots`：推理线程内部可同时挂起的异步 AscendCL slot 数量，当前第一版固定为 `2`。
+- `stream_slots`：推理线程内部可同时挂起的异步 AscendCL slot 数量，取值范围 `1..10`，默认 `2`。
 - `output_queue_size`：推理到输出的有界队列容量，满了丢最旧包。
 
 ## 关闭流程
@@ -323,7 +323,7 @@ pipeline:
 3. 保留当前串行 `run_demo_pipeline()`，新增 `run_threaded_pipeline()`。
 4. 配置增加 `pipeline.mode: "serial" | "threaded"`，开发和生产配置默认使用 `threaded`，单元测试 fixture 保持 `serial`。
 5. `threaded` 模式下固定单摄像头、单推理调度线程、单输出线程。
-6. 推理线程内部先固定 `stream_slots=2`，每个 slot 独占一条 AscendCL stream、一套模型输入 Device buffer 和一套模型输出 Device buffer。
+6. 推理线程内部按 `pipeline.stream_slots` 创建 slot，每个 slot 独占一条 AscendCL stream、一套模型输入 Device buffer 和一套模型输出 Device buffer。
 7. 输出线程第一版只消费 `PipelineOutputPacket{Frame, DetectionResult}`，保证帧和框严格匹配。
 8. `video_sink=none` 时不启动输出线程，也不把 `Frame` 放入输出队列；推理线程完成事件和统计后立即释放帧租约，减少 V4L2 buffer 占用时间。
 9. 性能报告增加：

@@ -33,6 +33,7 @@ struct InferenceConfig {
     std::string backend{"mock"};
     std::filesystem::path model_path{"models/yolo/yolo26n_aipp_nv12.om"};
     int device_id{0};
+    int stream_slots{2};
 };
 
 /**
@@ -45,6 +46,7 @@ struct InferenceConfig {
 struct PreprocessConfig {
     std::string backend{"dvpp"};
     int device_id{0};
+    int stream_slots{2};
     int output_width{640};
     int output_height{640};
     std::string output_layout{"NV12"};

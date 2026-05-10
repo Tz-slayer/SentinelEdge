@@ -59,7 +59,7 @@ public:
 
     /**
      * @brief 返回 AscendCL 异步推理 slot 数量。
-     * @return 当前固定返回 2。
+     * @return 返回按 `pipeline.stream_slots` 创建的 slot 数量。
      */
     std::size_t async_slot_count() const noexcept override;
 

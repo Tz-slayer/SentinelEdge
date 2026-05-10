@@ -399,6 +399,8 @@ void apply_pipeline_backend(SentinelConfig& config)
     if (config.pipeline.backend == "dvpp") {
         config.preprocess.backend = "dvpp";
         config.preprocess.device_id = config.inference.device_id;
+        config.preprocess.stream_slots = config.pipeline.stream_slots;
+        config.inference.stream_slots = config.pipeline.stream_slots;
         config.postprocess.backend = "dvpp";
         config.overlay.backend = "dvpp";
         return;
@@ -452,8 +454,8 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     if (config.pipeline.detect_fps <= 0) {
         throw std::runtime_error("pipeline.detect_fps must be greater than zero");
     }
-    if (config.pipeline.stream_slots != 2) {
-        throw std::runtime_error("pipeline.stream_slots must be 2 in the current implementation");
+    if (config.pipeline.stream_slots < 1 || config.pipeline.stream_slots > 10) {
+        throw std::runtime_error("pipeline.stream_slots must be in 1..10");
     }
     if (config.pipeline.output_queue_size <= 0) {
         throw std::runtime_error("pipeline.output_queue_size must be greater than zero");

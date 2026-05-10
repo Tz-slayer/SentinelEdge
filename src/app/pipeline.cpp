@@ -7,9 +7,8 @@
 #include "sentinel/preprocess/preprocessor_factory.hpp"
 #include "sentinel/video/video_source_factory.hpp"
 
-#include <chrono>
-#include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -432,7 +431,7 @@ struct PipelineStreamSlot {
 };
 
 /**
- * @brief 用两个 AscendCL stream slot 运行线程化主线流水线。
+ * @brief 按配置数量的 AscendCL stream slot 运行线程化主线流水线。
  * @param config 已通过校验的应用配置。
  * @param video_source 视频源策略对象，仅由采集线程访问。
  * @param logger 日志策略对象。
@@ -451,6 +450,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
     std::string thread_error;
     PipelineResult result;
     const bool output_enabled = config.output.video_sink != "none";
+    const auto stream_slot_count = static_cast<std::size_t>(config.pipeline.stream_slots);
 
     const auto request_stop = [&]() {
         stop.store(true);
@@ -551,8 +551,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                 return;
             }
 
-            if (detector->async_slot_count() <
-                static_cast<std::size_t>(config.pipeline.stream_slots)) {
+            if (detector->async_slot_count() < stream_slot_count) {
                 set_thread_error("detector async slot count is smaller than pipeline.stream_slots");
                 close_resources();
                 return;
@@ -568,7 +567,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                             std::to_string(config.performance.log_interval_frames));
             }
 
-            std::array<PipelineStreamSlot, 2> stream_slots;
+            std::vector<PipelineStreamSlot> stream_slots(stream_slot_count);
             std::uint64_t last_generation = 0;
             int submitted_frames = 0;
             const auto submit_interval = std::chrono::duration<double>(
@@ -697,9 +696,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                 return true;
             };
 
-            for (std::size_t slot_index = 0;
-                 slot_index < static_cast<std::size_t>(config.pipeline.stream_slots);
-                 ++slot_index) {
+            for (std::size_t slot_index = 0; slot_index < stream_slot_count; ++slot_index) {
                 if (!submit_slot(slot_index) && stop.load()) {
                     return;
                 }
@@ -708,12 +705,9 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
             std::size_t next_collect_slot = 0;
             while (!stop.load() && result.frames_processed < config.pipeline.max_frames) {
                 std::optional<std::size_t> busy_slot;
-                for (std::size_t offset = 0;
-                     offset < static_cast<std::size_t>(config.pipeline.stream_slots);
-                     ++offset) {
+                for (std::size_t offset = 0; offset < stream_slot_count; ++offset) {
                     const auto slot_index =
-                        (next_collect_slot + offset) %
-                        static_cast<std::size_t>(config.pipeline.stream_slots);
+                        (next_collect_slot + offset) % stream_slot_count;
                     if (stream_slots[slot_index].busy) {
                         busy_slot = slot_index;
                         break;
@@ -724,9 +718,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                     if (submitted_frames >= config.pipeline.max_frames || latest_frame.closed()) {
                         break;
                     }
-                    for (std::size_t slot_index = 0;
-                         slot_index < static_cast<std::size_t>(config.pipeline.stream_slots);
-                         ++slot_index) {
+                    for (std::size_t slot_index = 0; slot_index < stream_slot_count; ++slot_index) {
                         if (submit_slot(slot_index)) {
                             break;
                         }
@@ -738,7 +730,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                     return;
                 }
                 next_collect_slot =
-                    (*busy_slot + 1U) % static_cast<std::size_t>(config.pipeline.stream_slots);
+                    (*busy_slot + 1U) % stream_slot_count;
 
                 // 一个 slot 回收完成后立即补下一帧，避免该 stream 空闲等待另一个 slot。
                 if (submitted_frames < config.pipeline.max_frames && !latest_frame.closed()) {
@@ -746,9 +738,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                 }
             }
 
-            for (std::size_t slot_index = 0;
-                 slot_index < static_cast<std::size_t>(config.pipeline.stream_slots);
-                 ++slot_index) {
+            for (std::size_t slot_index = 0; slot_index < stream_slot_count; ++slot_index) {
                 if (!collect_slot(slot_index)) {
                     return;
                 }

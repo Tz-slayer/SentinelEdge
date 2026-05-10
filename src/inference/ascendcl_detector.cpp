@@ -18,11 +18,6 @@ namespace sentinel {
 namespace {
 
 /**
- * @brief 第一版固定启用的 AscendCL 异步 stream slot 数量。
- */
-constexpr std::size_t kAsyncSlotCount = 2;
-
-/**
  * @brief 判断 AscendCL 调用是否成功。
  * @param error AscendCL API 返回码。
  * @return 成功返回 `true`。
@@ -245,7 +240,7 @@ public:
 
     /**
      * @brief 返回异步推理 slot 数量。
-     * @return 当前固定返回 2。
+     * @return 当前已创建的异步推理 slot 数量。
      */
     std::size_t async_slot_count() const noexcept
     {
@@ -521,12 +516,16 @@ private:
     }
 
     /**
-     * @brief 创建固定数量的异步推理 slot。
+     * @brief 按运行配置创建异步推理 slot。
      * @return 成功返回 `true`。
      */
     bool create_slots()
     {
-        slots_.resize(kAsyncSlotCount);
+        if (config_.stream_slots < 1 || config_.stream_slots > 10) {
+            last_error_ = "inference.stream_slots must be in 1..10";
+            return false;
+        }
+        slots_.resize(static_cast<std::size_t>(config_.stream_slots));
         for (auto& slot : slots_) {
             auto ret = aclrtCreateStream(&slot.stream);
             if (!acl_ok(ret)) {
@@ -732,7 +731,7 @@ std::optional<TensorBuffer> AscendClDetector::mutable_input_tensor(const TensorB
 
 /**
  * @brief 返回 AscendCL 异步推理 slot 数量。
- * @return 当前固定返回 2。
+ * @return 当前已创建的异步推理 slot 数量。
  */
 std::size_t AscendClDetector::async_slot_count() const noexcept
 {

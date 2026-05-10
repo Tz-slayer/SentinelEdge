@@ -2,12 +2,12 @@
 
 #include "sentinel/ascend/acl_runtime.hpp"
 
-#include <array>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <linux/videodev2.h>
 
@@ -31,11 +31,6 @@ bool wants_nv12_tensor(const PreprocessConfig& config) noexcept
 }
 
 #if SENTINEL_ENABLE_DVPP
-
-/**
- * @brief 当前主线固定使用的 DVPP 异步预处理 slot 数量。
- */
-constexpr std::size_t kDvppPreprocessSlotCount = 2;
 
 /**
  * @brief 将数值向上对齐到指定粒度。
@@ -99,6 +94,33 @@ public:
 
     DeviceMemory(const DeviceMemory&) = delete;
     DeviceMemory& operator=(const DeviceMemory&) = delete;
+
+    /**
+     * @brief 转移 Device 内存所有权。
+     * @param other 被转移的 Device 内存对象。
+     *
+     * 移动后 `other` 置为空，确保同一块 AscendCL Device 内存只释放一次。
+     */
+    DeviceMemory(DeviceMemory&& other) noexcept
+        : data_(std::exchange(other.data_, nullptr))
+        , size_(std::exchange(other.size_, 0U))
+    {
+    }
+
+    /**
+     * @brief 释放当前内存并接管另一个对象的 Device 内存。
+     * @param other 被转移的 Device 内存对象。
+     * @return 当前对象引用。
+     */
+    DeviceMemory& operator=(DeviceMemory&& other) noexcept
+    {
+        if (this != &other) {
+            reset();
+            data_ = std::exchange(other.data_, nullptr);
+            size_ = std::exchange(other.size_, 0U);
+        }
+        return *this;
+    }
 
     /**
      * @brief 申请 Device 内存。
@@ -282,7 +304,7 @@ void synchronize_stream_before_releasing_async_buffers(aclrtStream stream) noexc
  * @brief DVPP 异步预处理 slot 独占资源。
  *
  * 每个推理 stream slot 对应一套 JPEGD 输出缓冲区、图片描述和 resize 配置，
- * 这样两个 stream 并发挂起时不会复用同一块临时 Device 内存或描述符。
+ * 这样多个 stream 并发挂起时不会复用同一块临时 Device 内存或描述符。
  */
 struct DvppPreprocessSlot {
     DeviceMemory decode_output;
@@ -340,6 +362,10 @@ public:
             last_error_ = "NV12/UINT8 output requires normalize=false";
             return false;
         }
+        if (config_.stream_slots < 1 || config_.stream_slots > 10) {
+            last_error_ = "preprocess.stream_slots must be in 1..10";
+            return false;
+        }
 
 #if SENTINEL_ENABLE_DVPP
         runtime_session_ = AclRuntimeSession::acquire(config_.device_id, last_error_);
@@ -379,6 +405,8 @@ public:
             close();
             return false;
         }
+        preprocess_slots_.clear();
+        preprocess_slots_.resize(static_cast<std::size_t>(config_.stream_slots));
         for (auto& slot : preprocess_slots_) {
             slot.decode_desc = std::make_unique<DvppPicDesc>();
             slot.device_resize_desc = std::make_unique<DvppPicDesc>();
@@ -420,6 +448,7 @@ public:
             slot.resize_config.reset();
             slot.decode_output.reset();
         }
+        preprocess_slots_.clear();
         if (channel_created_) {
             acldvppDestroyChannel(channel_desc_);
             channel_created_ = false;
@@ -968,7 +997,7 @@ private:
     std::unique_ptr<DvppPicDesc> host_resize_desc_;
     std::unique_ptr<DvppPicDesc> device_resize_desc_;
     std::unique_ptr<DvppResizeConfig> resize_config_;
-    std::array<DvppPreprocessSlot, kDvppPreprocessSlotCount> preprocess_slots_;
+    std::vector<DvppPreprocessSlot> preprocess_slots_;
 #endif
 };
 

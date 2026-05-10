@@ -72,7 +72,7 @@ V4L2 loaned MJPEG payload
 - `AscendClDetector::detect()` 收到同一块模型输入 Device buffer 时跳过输入拷贝；收到其他 Device buffer 时只做 Device-to-Device 拷贝。
 - `AscendClDetector::submit_async()` 在同一 stream 中排在 DVPP JPEGD/VPC 之后提交模型推理，`collect_async()` 统一同步该 slot 并回收结果。
 - `DvppFramePreprocessor` 复用 JPEGD 输出 Device buffer、Host fallback 的 VPC 输出 Device buffer、`acldvppPicDesc` 和 `acldvppResizeConfig`。
-- `DvppFramePreprocessor` 在线程化路径中为 2 个 stream slot 隔离复用 DVPP 临时资源，避免异步挂起任务互相覆盖。
+- `DvppFramePreprocessor` 在线程化路径中按 `pipeline.stream_slots` 隔离复用 DVPP 临时资源，避免异步挂起任务互相覆盖。
 - `DvppImageBackend` 复用调试输出链路的 JPEGD 输出 Device buffer、Host NV12 缓冲区和 `acldvppPicDesc`。
 - debug 日志会打印模型输入张量 `memory=host/device`，用于确认当前是否走到 Device buffer 直写路径。
 

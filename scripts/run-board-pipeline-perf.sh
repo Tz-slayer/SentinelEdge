@@ -6,6 +6,7 @@ CONFIG_DIR="${2:-config/dev}"
 FRAMES="${FRAMES:-300}"
 INTERVAL="${INTERVAL:-30}"
 DETECT_FPS="${DETECT_FPS:-30}"
+STREAM_SLOTS="${STREAM_SLOTS:-2}"
 CSV_PATH="${CSV_PATH:-perf/pipeline.csv}"
 LOG_NAME="${LOG_NAME:-pipeline.log}"
 
@@ -42,10 +43,11 @@ sed -i \
     -e "s|^  csv_path:.*|  csv_path: \"${CSV_PATH}\"|" \
     -e "s/^  max_frames:.*/  max_frames: ${FRAMES}/" \
     -e "s/^  detect_fps:.*/  detect_fps: ${DETECT_FPS}/" \
+    -e "s/^  stream_slots:.*/  stream_slots: ${STREAM_SLOTS}/" \
     "${CONFIG_FILE}"
 
-printf 'running single pipeline perf: package=%s config=%s frames=%s interval=%s detect_fps=%s csv=%s\n' \
-    "${PACKAGE_DIR}" "${CONFIG_DIR}" "${FRAMES}" "${INTERVAL}" "${DETECT_FPS}" "${CSV_PATH}"
+printf 'running single pipeline perf: package=%s config=%s frames=%s interval=%s detect_fps=%s stream_slots=%s csv=%s\n' \
+    "${PACKAGE_DIR}" "${CONFIG_DIR}" "${FRAMES}" "${INTERVAL}" "${DETECT_FPS}" "${STREAM_SLOTS}" "${CSV_PATH}"
 printf 'fixed profile: backend=dvpp buffer_mode=loaned sink=none\n'
 
 (
