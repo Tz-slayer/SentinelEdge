@@ -462,8 +462,8 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     if (config.pipeline.mode != "serial" && config.pipeline.mode != "threaded") {
         throw std::runtime_error("pipeline.mode must be serial or threaded");
     }
-    if (config.pipeline.max_frames <= 0) {
-        throw std::runtime_error("pipeline.max_frames must be greater than zero");
+    if (config.pipeline.max_frames <= 0 && config.pipeline.max_frames != -1) {
+        throw std::runtime_error("pipeline.max_frames must be greater than zero or -1 (infinite)");
     }
     if (config.pipeline.detect_fps <= 0) {
         throw std::runtime_error("pipeline.detect_fps must be greater than zero");
