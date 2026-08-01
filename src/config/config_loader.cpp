@@ -259,8 +259,6 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             config.mqtt.host = value;
         } else if (section == "mqtt" && key == "port") {
             config.mqtt.port = std::stoi(value);
-        } else if (section == "mqtt" && key == "client_id") {
-            config.mqtt.client_id = value;
         } else if (section == "mqtt" && key == "username") {
             config.mqtt.username = value;
         } else if (section == "mqtt" && key == "password") {
@@ -431,6 +429,42 @@ bool is_nv12_uint8_preprocess(const PreprocessConfig& config)
     return config.output_layout == "NV12" && config.output_dtype == "UINT8";
 }
 
+/**
+ * @brief 动态获取主网卡的 MAC 地址（去掉冒号），用作设备唯一标识。
+ * @return 获取到的 MAC 地址字符串，如果失败则返回 "unknown_device"。
+ */
+std::string get_mac_address()
+{
+    std::string mac_address = "unknown_device";
+    const std::filesystem::path net_dir("/sys/class/net");
+    if (!std::filesystem::exists(net_dir)) {
+        return mac_address;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(net_dir)) {
+        const std::string iface_name = entry.path().filename().string();
+        // 忽略回环网卡
+        if (iface_name != "lo") {
+            std::ifstream addr_file(entry.path() / "address");
+            if (addr_file) {
+                std::string addr;
+                if (std::getline(addr_file, addr)) {
+                    std::string clean_mac;
+                    for (char c : addr) {
+                        if (c != ':') {
+                            clean_mac += static_cast<char>(std::tolower(c));
+                        }
+                    }
+                    if (!clean_mac.empty()) {
+                        return clean_mac;
+                    }
+                }
+            }
+        }
+    }
+    return mac_address;
+}
+
 } // namespace
 
 /**
@@ -445,6 +479,16 @@ SentinelConfig load_config(const std::filesystem::path& config_dir)
     load_camera_config(config_dir, config);
     load_rule_config(config_dir, config);
     apply_pipeline_backend(config);
+
+    // 强制使用动态获取的 MAC 地址作为设备 ID (client_id)，不允许通过配置文件覆盖
+    const std::string mac = get_mac_address();
+    if (mac != "unknown_device") {
+        // MQTT clientId 需要唯一，可以使用 MAC 地址
+        config.mqtt.client_id = mac;
+    } else {
+        // fallback 为固定名称
+        config.mqtt.client_id = "edge_unknown";
+    }
 
     // 先做最基本的运行前校验，避免后续流水线在空配置上继续运行。
     if (config.cameras.empty()) {

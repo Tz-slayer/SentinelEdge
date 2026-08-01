@@ -61,7 +61,7 @@ mqtt:
   enabled: true
   host: "45.62.109.151"
   port: 1883
-  client_id: "device_001"
+
   username: "admin"
   password: "taozhen666."
   heartbeat_interval_s: 30

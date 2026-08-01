@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <unistd.h>
+#include <nlohmann/json.hpp>
 
 /**
  * @brief 程序主入口。
@@ -68,6 +70,35 @@ int main(int argc, char** argv)
                 logger->info("mqtt client connected");
                 mqtt_publisher = std::make_shared<sentinel::api::MqttEventPublisher>(
                     mqtt_client, config.mqtt.client_id, logger.get());
+                    
+                // 订阅广播扫描 topic
+                mqtt_client->subscribe("cloud/broadcast/sys/scan", 0);
+                
+                // 设置消息回调处理扫描广播
+                mqtt_client->set_message_callback([&config, mqtt_client, logger_ptr = logger.get()](const std::string& topic, const std::string& payload) {
+                    if (topic == "cloud/broadcast/sys/scan") {
+                        try {
+                            auto j = nlohmann::json::parse(payload);
+                            if (j.contains("scanId")) {
+                                std::string scan_id = j["scanId"];
+                                
+                                char hostname[256] = "unknown";
+                                gethostname(hostname, sizeof(hostname));
+                                
+                                nlohmann::json reply;
+                                reply["scanId"] = scan_id;
+                                reply["hostname"] = std::string(hostname);
+                                reply["status"] = "online";
+                                
+                                std::string reply_topic = "edge/" + config.mqtt.client_id + "/sys/scan_reply";
+                                mqtt_client->publish(reply_topic, reply.dump(), 0, false);
+                                logger_ptr->info("Replied to scan request: " + scan_id);
+                            }
+                        } catch (const std::exception& e) {
+                            logger_ptr->error("Failed to parse scan request: " + std::string(e.what()));
+                        }
+                    }
+                });
                     
                 // 启动心跳后台线程
                 heartbeat_thread = std::thread([&]() {

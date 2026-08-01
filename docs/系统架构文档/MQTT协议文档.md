@@ -13,7 +13,13 @@
 *   **下行控制 (Cloud -> Edge)**: `cmd/{device_id}/<module>/<action>`
 *   **设备响应 (Edge -> Cloud)**: `edge/{device_id}/<module>/<action>_reply`
 
-> 注：`{device_id}` 为边缘终端的唯一标识符（如 MAC 地址或注册时分配的 UUID）。
+> **注：关于 `{device_id}` (设备唯一标识)**
+>
+> 为实现**零配置部署 (Zero-Touch Provisioning)** 并杜绝冲突，C++ 客户端不再接受人为配置，而是**强制自动读取**当前设备主网卡的物理 MAC 地址（去除冒号且转小写）作为 `{device_id}`。
+>
+> **示例**：
+> 如果边缘开发板的 MAC 地址是 `00:1A:2B:3C:4D:5E`，则 `{device_id}` 将自动设定为：`001a2b3c4d5e`。
+> 其对应的心跳 Topic 即为：`edge/001a2b3c4d5e/sys/heartbeat`。
 
 ---
 
@@ -188,5 +194,34 @@
   "code": 200,
   "message": "success",
   "current_status": "streaming"
+}
+```
+
+---
+
+## 7. 设备扫描与发现 (Active Device Scan)
+
+除了依赖心跳的被动发现机制外，云端可以通过发布全局广播消息，主动请求当前所有连接在 Broker 上的设备进行即时信息上报。
+
+### 7.1 扫描广播指令 (下行 - 广播)
+云端向一个固定的全局 Topic 发布扫描指令，所有边缘设备在启动时默认订阅该 Topic。
+*   **Topic**: `cloud/broadcast/sys/scan`
+*   **Payload**:
+```json
+{
+  "scanId": "uuid",
+  "timestamp": 1785580000
+}
+```
+
+### 7.2 扫描指令响应 (上行)
+边缘设备收到广播扫描指令后，立即将自身的硬件信息和当前状态打包回复给云端。
+*   **Topic**: `edge/{device_id}/sys/scan_reply`
+*   **Payload 示例**:
+```json
+{
+  "scanId": "uuid",
+  "hostname": "orangepi-aipro", 
+  "status": "online"
 }
 ```

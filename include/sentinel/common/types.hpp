@@ -117,7 +117,7 @@ struct MqttConfig {
     bool enabled{false};
     std::string host{"127.0.0.1"};
     int port{1883};
-    std::string client_id{"video_sentinel_edge"};
+    std::string client_id{"auto"};
     std::string username{""};
     std::string password{""};
     int heartbeat_interval_s{30};
