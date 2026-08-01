@@ -9,7 +9,7 @@ logging:
 
 inference:
   backend: "ascendcl"
-  model_path: "models/yolo/yolo26n_aipp_nv12.om"
+  model_path: "/root/Documents/github/SentinelEdge/build/board-native-debug-package/models/yolo/yolo26n_aipp_nv12.om"
   device_id: 0
 
 preprocess:
