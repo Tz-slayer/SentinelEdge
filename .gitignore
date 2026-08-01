@@ -40,10 +40,6 @@ config/*.yaml
 *.env
 .env.*
 
-# Local SDKs
-third_party/*
-!third_party/README.md
-
 # Logs
 *.log
 logs/
