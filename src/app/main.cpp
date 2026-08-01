@@ -108,7 +108,7 @@ int main(int argc, char** argv)
                          std::to_string(event.confidence));
         }
 
-        if (result.frames_processed < config.pipeline.max_frames) {
+        if (config.pipeline.max_frames != -1 && result.frames_processed < config.pipeline.max_frames) {
             logger->warn("shutdown before reaching configured max_frames");
         }
 

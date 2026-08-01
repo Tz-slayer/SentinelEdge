@@ -630,7 +630,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
             };
 
             const auto submit_slot = [&](std::size_t slot_index) -> bool {
-                if (submitted_frames >= config.pipeline.max_frames || stop.load()) {
+                if ((config.pipeline.max_frames != -1 && submitted_frames >= config.pipeline.max_frames) || stop.load()) {
                     return false;
                 }
 
@@ -703,7 +703,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
             }
 
             std::size_t next_collect_slot = 0;
-            while (!stop.load() && result.frames_processed < config.pipeline.max_frames) {
+            while (!stop.load() && (config.pipeline.max_frames == -1 || result.frames_processed < config.pipeline.max_frames)) {
                 std::optional<std::size_t> busy_slot;
                 for (std::size_t offset = 0; offset < stream_slot_count; ++offset) {
                     const auto slot_index =
@@ -715,7 +715,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                 }
 
                 if (!busy_slot.has_value()) {
-                    if (submitted_frames >= config.pipeline.max_frames || latest_frame.closed()) {
+                    if ((config.pipeline.max_frames != -1 && submitted_frames >= config.pipeline.max_frames) || latest_frame.closed()) {
                         break;
                     }
                     for (std::size_t slot_index = 0; slot_index < stream_slot_count; ++slot_index) {
@@ -733,7 +733,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                     (*busy_slot + 1U) % stream_slot_count;
 
                 // 一个 slot 回收完成后立即补下一帧，避免该 stream 空闲等待另一个 slot。
-                if (submitted_frames < config.pipeline.max_frames && !latest_frame.closed()) {
+                if ((config.pipeline.max_frames == -1 || submitted_frames < config.pipeline.max_frames) && !latest_frame.closed()) {
                     static_cast<void>(submit_slot(*busy_slot));
                 }
             }
@@ -955,7 +955,7 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
 
     PipelineResult result;
 
-    for (int frame_index = 0; frame_index < config.pipeline.max_frames; ++frame_index) {
+    for (int frame_index = 0; config.pipeline.max_frames == -1 || frame_index < config.pipeline.max_frames; ++frame_index) {
         const auto frame_start = Clock::now();
 
         // 停止回调放在每轮开头，确保主循环能尽快响应 SIGINT/SIGTERM。
