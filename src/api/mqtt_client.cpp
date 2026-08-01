@@ -68,6 +68,11 @@ bool MqttClient::connect()
 void MqttClient::disconnect() 
 {
     if (running_) {
+        // 主动发送正常下线的状态消息，因为正常 disconnect 时 Broker 会销毁遗嘱而不发送
+        std::string status_topic = "edge/" + client_id_ + "/sys/status";
+        std::string status_payload = "{\"status\":\"offline\",\"reason\":\"graceful_shutdown\"}";
+        mosquitto_publish(mosq_, nullptr, status_topic.c_str(), status_payload.size(), status_payload.c_str(), 1, true);
+
         running_ = false;
         mosquitto_disconnect(mosq_);
         if (loop_thread_.joinable()) {
