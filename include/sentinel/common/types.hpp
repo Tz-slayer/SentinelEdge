@@ -111,6 +111,19 @@ struct PerformanceConfig {
 };
 
 /**
+ * @brief MQTT 连接与通信配置。
+ */
+struct MqttConfig {
+    bool enabled{false};
+    std::string host{"127.0.0.1"};
+    int port{1883};
+    std::string client_id{"video_sentinel_edge"};
+    std::string username{""};
+    std::string password{""};
+    int heartbeat_interval_s{30};
+};
+
+/**
  * @brief 流水线级运行配置。
  *
  * `backend` 保留为配置字段用于启动校验和日志可读性。当前主线只接受
@@ -168,20 +181,21 @@ struct SentinelConfig {
     PipelineConfig pipeline;
     std::vector<CameraConfig> cameras;
     RuleConfig rules;
+    MqttConfig mqtt;
 };
 
 /**
  * @brief 图像空间中的归一化矩形框。
  */
 struct Rect {
-    double x{0.0};
-    double y{0.0};
-    double width{0.0};
-    double height{0.0};
+    double x{0.0};        // 左上角 X 坐标，归一化到 [0.0, 1.0]
+    double y{0.0};        // 左上角 Y 坐标，归一化到 [0.0, 1.0]
+    double width{0.0};    // 宽度，归一化到 [0.0, 1.0]
+    double height{0.0};   // 高度，归一化到 [0.0, 1.0]
 };
 
 /**
- * @brief 视频帧外部载荷的生命周期租约。
+ * @brief 视频帧外部载荷的生命周期租约基类。
  *
  * 该接口用于表达非 `Frame::data` 拥有的帧载荷生命周期，例如 V4L2
  * `mmap` 缓冲区。最后一个持有租约的 `Frame` 销毁时，具体实现负责把
@@ -191,7 +205,7 @@ struct Rect {
 class FramePayloadLease {
 public:
     /**
-     * @brief 释放帧载荷租约。
+     * @brief 释放帧载荷租约，虚函数供派生类正确处理资源释放。
      */
     virtual ~FramePayloadLease() = default;
 
@@ -211,17 +225,17 @@ protected:
  * @brief 一帧采集结果及其关联元数据。
  */
 struct Frame {
-    int sequence{0};
-    std::string camera_id;
-    int width{0};
-    int height{0};
-    std::uint32_t pixel_format{0};
-    std::int64_t timestamp_ns{0};
-    std::size_t bytes_used{0};
-    std::vector<std::uint8_t> data;
-    const std::uint8_t* loaned_data{nullptr};
-    std::size_t loaned_size{0};
-    std::shared_ptr<FramePayloadLease> payload_lease;
+    int sequence{0};                                        // 帧序列号
+    std::string camera_id;                                  // 摄像头 ID
+    int width{0};                                           // 帧宽度
+    int height{0};                                          // 帧高度
+    std::uint32_t pixel_format{0};                          // 像素格式
+    std::int64_t timestamp_ns{0};                           // 时间戳（纳秒）
+    std::size_t bytes_used{0};                              // 已使用字节数
+    std::vector<std::uint8_t> data;                         // 帧数据，完整的数据   
+    const std::uint8_t* loaned_data{nullptr};               // 帧数据指针，指向外部租借缓冲区
+    std::size_t loaned_size{0};                             // 指针指向的数据大小
+    std::shared_ptr<FramePayloadLease> payload_lease;       // 资源管理对象，负责内存的释放
 
     /**
      * @brief 返回当前帧载荷的只读起始地址。
@@ -229,6 +243,7 @@ struct Frame {
      */
     const std::uint8_t* payload_data() const noexcept
     {
+        // mock 数据不走租约机制，直接使用 `data`；实际采集的帧通过 `loaned_data` 指向驱动缓冲区。
         return loaned_data != nullptr ? loaned_data : data.data();
     }
 
@@ -329,11 +344,11 @@ struct ModelOutputBuffer {
  * @brief 与某一帧绑定的一条检测结果。
  */
 struct Detection {
-    std::string label;
-    double confidence{0.0};
-    Rect bounding_box;
-    int frame_sequence{0};
-    std::string camera_id;
+    std::string label;              // 检测类别标签，例如 "person"
+    double confidence{0.0};         // 置信度分数，范围 [0.0, 1.0]
+    Rect bounding_box;              // 检测框坐标，归一化到 [0.0, 1.0]
+    int frame_sequence{0};          // 帧序列号
+    std::string camera_id;           // 摄像头 ID
 };
 
 /**

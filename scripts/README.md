@@ -22,7 +22,7 @@ yolo export model=yolo26n.pt format=onnx opset=11
 ## 2. 使用 atc 将 ONNX 模型转换为 OM 格式
 
 ```bash
-atc --framework=5 --model=yolo26n.onnx --output=yolo26n --input_format=NCHW --input_shape="images:1,3,640,640" --ouput_type=FP32 --log=debug --soc_version=Ascend310B4
+atc --framework=5 --model=yolo26n.onnx --output=yolo26n --input_format=NCHW --input_shape="images:1,3,640,640" --output_type=FP32 --log=debug --soc_version=Ascend310B4
 ```
 
 如果运行成功会看到如下输出：
@@ -44,7 +44,7 @@ ATC run success, welcome to the next use.
 使用如下命令可以查看生成的 OM 模型文件：
 
 ```bash
-(base) root@orangepiaipro:~/Downloads# atc --mode=6 --om=./yolo26n.om
+(base) root@orangepiaipro:~/Downloads# atc --mode=6 --om=./yolo26n_aipp_nv12.om
 ATC start working now, please wait for a moment.
 ============ Display Model Info start ============
 Original Atc command line: /usr/local/Ascend/ascend-toolkit/8.0.0/aarch64-linux/bin/atc.bin --framework=5 --model=./yolo26n.onnx --input_format=NCHW --input_shape=images:1,3,640,640 --output=./yolo26n_bs1 --soc_version=Ascend310B4 --log=info

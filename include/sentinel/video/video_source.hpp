@@ -36,7 +36,7 @@ public:
 
     /**
      * @brief 返回稳定的视频源类型标识。
-     * @return 例如 `"mock"`、`"v4l2"` 等类型字符串。
+     * @return 例如 `"mock"`、`"v4l2"、"rtsp"` 等类型字符串。
      */
     virtual std::string_view kind() const noexcept = 0;
 

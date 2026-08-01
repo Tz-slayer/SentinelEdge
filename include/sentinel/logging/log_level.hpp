@@ -8,10 +8,10 @@ namespace sentinel {
  * @brief 表示日志消息的严重级别。
  */
 enum class LogLevel {
-    kDebug = 0,
-    kInfo = 1,
-    kWarn = 2,
-    kError = 3,
+    kDebug = 0,         // 调试级别，适合开发阶段输出的详细信息。
+    kInfo = 1,          // 信息级别，适合生产环境输出的常规运行信息。
+    kWarn = 2,          // 警告级别，适合输出需要关注但不紧急的问题。
+    kError = 3,         // 错误级别，适合输出严重问题。
 };
 
 /**

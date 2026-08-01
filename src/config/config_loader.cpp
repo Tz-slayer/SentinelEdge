@@ -253,6 +253,20 @@ void load_service_config(const std::filesystem::path& config_dir, SentinelConfig
             config.performance.log_interval_frames = std::stoi(value);
         } else if (section == "performance" && key == "csv_path") {
             config.performance.csv_path = value;
+        } else if (section == "mqtt" && key == "enabled") {
+            config.mqtt.enabled = parse_bool(value);
+        } else if (section == "mqtt" && key == "host") {
+            config.mqtt.host = value;
+        } else if (section == "mqtt" && key == "port") {
+            config.mqtt.port = std::stoi(value);
+        } else if (section == "mqtt" && key == "client_id") {
+            config.mqtt.client_id = value;
+        } else if (section == "mqtt" && key == "username") {
+            config.mqtt.username = value;
+        } else if (section == "mqtt" && key == "password") {
+            config.mqtt.password = value;
+        } else if (section == "mqtt" && key == "heartbeat_interval_s") {
+            config.mqtt.heartbeat_interval_s = std::stoi(value);
         } else if (section == "runtime" && key == "data_dir") {
             config.service.data_dir = value;
         } else if (section == "pipeline" && key == "backend") {

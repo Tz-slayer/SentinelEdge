@@ -52,7 +52,7 @@ std::int64_t to_timestamp_ns(const timeval& value)
 }
 
 /**
- * @brief 在析构路径中重试 `ioctl`，避免 `EINTR` 导致缓冲区未归还。
+ * @brief 在析构路径中重试 `ioctl`，避免 `EINTR` 也就是用户 ctrl+c 导致缓冲区未归还。
  * @param fd 已打开的 V4L2 设备描述符。
  * @param request V4L2 ioctl 请求号。
  * @param arg 请求载荷地址。
@@ -63,7 +63,7 @@ int xioctl_noexcept(int fd, unsigned long request, void* arg) noexcept
     int result = -1;
     do {
         result = ::ioctl(fd, request, arg);
-    } while (result == -1 && errno == EINTR);
+    } while (result == -1 && errno == EINTR); // errno 能够反映当前线程最近一次系统调用的错误原因，EINTR 表示调用被信号中断，需要重试。
     return result;
 }
 
@@ -103,8 +103,8 @@ std::string poll_revents_to_string(short revents)
  * @brief V4L2 设备状态，供外部帧租约判断是否还能归还缓冲区。
  */
 struct CameraVideoSource::DeviceState {
-    int fd{-1};
-    bool streaming{false};
+    int fd{-1};              // 设备文件描述符，-1 表示未打开
+    bool streaming{false};   // 设备是否处于流式采集状态，租约对象据此判断是否需要归还缓冲区
 };
 
 /**
@@ -155,9 +155,9 @@ private:
         returned_ = true;
     }
 
-    std::shared_ptr<CameraVideoSource::DeviceState> state_;
+    std::shared_ptr<CameraVideoSource::DeviceState> state_; // 设备状态
     v4l2_buffer buffer_{};
-    bool returned_{false};
+    bool returned_{false}; // 标记租约是否已经归还，避免重复归还或多线程竞争时的双重归还
 };
 
 /**

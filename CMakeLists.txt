@@ -91,6 +91,19 @@ if(SENTINEL_OPENCV_COMPONENTS)
     find_package(OpenCV REQUIRED COMPONENTS ${SENTINEL_OPENCV_COMPONENTS})
 endif()
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FFMPEG REQUIRED libavformat libavcodec libavutil)
+
+# 源码编译 Mosquitto 客户端库，不再依赖系统的 apt 安装
+set(WITH_BROKER OFF CACHE BOOL "Disable mosquitto broker" FORCE)
+set(WITH_APPS OFF CACHE BOOL "Disable mosquitto apps" FORCE)
+set(WITH_PLUGINS OFF CACHE BOOL "Disable mosquitto plugins" FORCE)
+set(WITH_CLIENTS OFF CACHE BOOL "Disable mosquitto clients" FORCE)
+set(DOCUMENTATION OFF CACHE BOOL "Disable mosquitto docs" FORCE)
+set(WITH_TLS OFF CACHE BOOL "Disable TLS to avoid OpenSSL dependency" FORCE)
+set(WITH_CJSON OFF CACHE BOOL "Disable cJSON" FORCE)
+add_subdirectory(third_party/mosquitto)
+
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated/include/sentinel/build)
 
 configure_file(
@@ -166,6 +179,8 @@ set(SENTINEL_CORE_SOURCES
     src/video/camera_video_source.cpp
     src/video/rtsp_video_source.cpp
     src/video/video_source_factory.cpp
+    src/api/mqtt_client.cpp
+    src/api/mqtt_publisher.cpp
 )
 
 if(ENABLE_ASCENDCL)
@@ -206,6 +221,8 @@ target_include_directories(sentinel_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_BINARY_DIR}/generated/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mosquitto/include
 )
 
 target_link_libraries(sentinel_core
@@ -254,6 +271,16 @@ if(SENTINEL_OPENCV_COMPONENTS)
             ${OpenCV_LIBS}
     )
 endif()
+
+target_include_directories(sentinel_core
+    PUBLIC
+        ${FFMPEG_INCLUDE_DIRS}
+)
+target_link_libraries(sentinel_core
+    PUBLIC
+        ${FFMPEG_LIBRARIES}
+        libmosquitto
+)
 
 add_executable(video_sentinel
     src/app/main.cpp

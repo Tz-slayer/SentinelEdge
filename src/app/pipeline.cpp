@@ -267,8 +267,8 @@ struct CapturedFramePacket {
  * frame N 的检测框画到 frame N+k 上。
  */
 struct PipelineOutputPacket {
-    Frame frame;
-    std::vector<Detection> detections;
+    Frame frame;                            // 原始帧数据
+    std::vector<Detection> detections;      // 同一帧的检测结果列表
 };
 
 /**
@@ -338,11 +338,11 @@ public:
     }
 
 private:
-    mutable std::mutex mutex_;
+    mutable std::mutex mutex_;                  // 保护 latest_、generation_ 和 closed_ 的互斥锁
     std::condition_variable condition_;
-    std::optional<CapturedFramePacket> latest_;
-    std::uint64_t generation_{0};
-    bool closed_{false};
+    std::optional<CapturedFramePacket> latest_; // 当前最新帧包
+    std::uint64_t generation_{0};               // 帧包版本号，每发布一帧递增
+    bool closed_{false};                        // 标记单槽缓冲区是否已关闭，关闭后等待线程会被唤醒并返回空
 };
 
 /**
@@ -416,8 +416,8 @@ public:
 private:
     std::mutex mutex_;
     std::condition_variable condition_;
-    std::deque<PipelineOutputPacket> queue_;
-    std::size_t capacity_{1};
+    std::deque<PipelineOutputPacket> queue_;   // 双端队列实现有界队列，满时丢弃最旧元素
+    std::size_t capacity_{1};                  // 队列容量，必须大于 0
     bool closed_{false};
 };
 
@@ -443,7 +443,7 @@ PipelineResult run_threaded_pipeline(const SentinelConfig& config,
                                      Logger& logger,
                                      const std::function<bool()>& stop_requested)
 {
-    LatestFrameSlot latest_frame;
+    LatestFrameSlot latest_frame; // 存储最新帧
     BoundedOutputQueue output_queue(static_cast<std::size_t>(config.pipeline.output_queue_size));
     std::atomic_bool stop{false};
     std::mutex error_mutex;
@@ -873,6 +873,7 @@ PipelineResult run_demo_pipeline(const SentinelConfig& config,
                                  Logger& logger,
                                  const std::function<bool()>& stop_requested)
 {
+    // 开启多线程流水线模式
     if (config.pipeline.mode == "threaded") {
         return run_threaded_pipeline(config, video_source, logger, stop_requested);
     }

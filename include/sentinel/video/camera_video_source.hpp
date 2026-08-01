@@ -135,7 +135,7 @@ private:
 
     CameraConfig config_;
     std::vector<BufferView> buffers_;
-    std::shared_ptr<DeviceState> device_state_;
+    std::shared_ptr<DeviceState> device_state_;   // 设别状态
     std::string last_error_;
     int fd_{-1};
     int next_sequence_{1};

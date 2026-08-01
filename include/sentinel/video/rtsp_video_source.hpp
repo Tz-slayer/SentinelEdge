@@ -8,7 +8,7 @@
 namespace sentinel {
 
 /**
- * @brief 预留给后续 RTSP 传输实现的视频源骨架。
+ * @brief RTSP 传输实现的视频源。
  */
 class RtspVideoSource final : public VideoSource {
 public:
@@ -51,6 +51,17 @@ private:
     CameraConfig config_;
     std::string last_error_;
     bool is_open_{false};
+    int frame_sequence_{0};
+
+    // FFmpeg contexts (using void* to avoid including FFmpeg headers in the header file)
+    void* format_context_{nullptr};
+    void* decoder_context_{nullptr};
+    void* encoder_context_{nullptr};
+    void* packet_{nullptr};
+    void* frame_{nullptr};
+    int video_stream_index_{-1};
+
+    bool decode_and_encode(void* in_packet, std::vector<std::uint8_t>& out_jpeg);
 };
 
 } // namespace sentinel
